@@ -28,6 +28,14 @@ def adjust_location(loc, bound=150):
         return -bound
     return loc 
 
+
+def adjust_altitude(z, zmin=50, zmax=150):
+    ''' Force the UAV altitude within zmin and zmax'''
+    z = np.minimum(z, zmax)
+    z = np.maximum(z, zmin)
+    return z 
+
+
 def stop_wandering(x, y, upper_left, lower_right):
     '''Return True if the location (x,y) of the user is in the hot spot area -> very likely that no more movement will be made'''
     return True if upper_left[0] <= x <= lower_right[0] and lower_right[1] <= y <= upper_left[1] else False

@@ -72,11 +72,11 @@ def load_data(filepath):
 Helper Functions for Plotting figures 
 --------------------------------------------------------------------------------
 '''  
+import matplotlib.pyplot as plt
+import pandas as pd
+import matplotlib as mpl
+    
 def plot_moving_average( raw_data, rolling_intv, ylabel, filepath=None, title=None):
-    import matplotlib.pyplot as plt
-    import pandas as pd
-    import matplotlib as mpl
-
     data_array = np.asarray(raw_data)
     df = pd.DataFrame(raw_data)
 
@@ -99,7 +99,7 @@ def plot_moving_average( raw_data, rolling_intv, ylabel, filepath=None, title=No
     plt.legend()
     
     plt.ylabel(ylabel)
-    plt.xlabel('Time slot (sec)')
+    plt.xlabel('Time (sec)')
     plt.title(title)
     
     if filepath == None: 
@@ -109,13 +109,24 @@ def plot_moving_average( raw_data, rolling_intv, ylabel, filepath=None, title=No
     
     
 def export_moving_average(raw_data, rolling_intv=1):
-    import matplotlib.pyplot as plt
-    import pandas as pd 
-    import matplotlib as mpl
-    
     data_array = np.asarray(raw_data)
     df = pd.DataFrame(raw_data)
     y_axis = np.hstack(df.rolling(window=rolling_intv, min_periods=1).mean().values)
     
     return y_axis
 
+
+def export_moving_min(raw_data, rolling_intv=1):
+    data_array = np.asarray(raw_data)
+    df = pd.DataFrame(raw_data)
+    y_axis = np.hstack(df.rolling(window=rolling_intv, min_periods=1).min().values)
+    
+    return y_axis
+
+
+def export_moving_max(raw_data, rolling_intv=1):
+    data_array = np.asarray(raw_data)
+    df = pd.DataFrame(raw_data)
+    y_axis = np.hstack(df.rolling(window=rolling_intv, min_periods=1).max().values)
+    
+    return y_axis
