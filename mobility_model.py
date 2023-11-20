@@ -7,7 +7,6 @@ rng = np.random.default_rng()
 def deg2rad(deg):
     ''' Convert degree to radian '''
     return deg*np.pi/180 
-# print(np.sin(deg2rad(30)))
 
 
 def rad2deg(rad):
@@ -41,7 +40,7 @@ def stop_wandering(x, y, upper_left, lower_right):
     return True if upper_left[0] <= x <= lower_right[0] and lower_right[1] <= y <= upper_left[1] else False
      
 
-def generate_mobility_GM(x0=0, y0=0, n_slots=1000, slot_len=1, boundary=150, upper_left=(-150,150), lower_right=(-100,100)):
+def generate_mobility_GM(x0=0, y0=0, n_slots=1000, slot_len=1, boundary=150, upper_left=(-150,150), lower_right=(-100,100), speed_avg=3):
     '''
     Gauss-Markov Mobility model
     Arguments: 
@@ -56,15 +55,17 @@ def generate_mobility_GM(x0=0, y0=0, n_slots=1000, slot_len=1, boundary=150, upp
         2014. An enhanced Gauss-Markov mobility model for simulations of unmanned aerial ad hoc networks
     '''
     randomness_deg = 0.5                        # degree of randomness, 0 -> fully random, 1 -> no randomness 
-    speed_avg = 1.5                             # meters per second 
+    # speed_avg = 3                             # meters per second 
     std_speed = speed_avg/3                     # standard deviation of the random variable for the speed 
-    direction_dev_avg = 0                       # in degree, the mean direction deviation 
-    std_direction_dev = 7.5                       # in degree, the standard deviation of the random variable for the direction deviation 
-    direction_dev_avg_oob = 15                  # similar to direction_dev_avg, but in case out of boundary 
-    std_direction_dev_oob = 2                   # similar to std_direction_dev, but in case out of boundary 
     
-    movement_prob_wandering = 0.8                 # prob. that the user make a movement when not in the hot spot 
-    movement_prob_hotspot = 0.10                 # movement probability in the hot spot 
+    direction_dev_avg = 0                       # in degree, the mean direction deviation 
+    std_direction_dev = 10                      # in degree, the standard deviation of the random variable for the direction deviation 
+    
+    direction_dev_avg_oob = 30                  # similar to direction_dev_avg, but in case out of boundary 
+    std_direction_dev_oob = 5                   # similar to std_direction_dev, but in case out of boundary 
+    
+    movement_prob_wandering = 1.0                # prob. that the user make a movement when not in the hot spot 
+    # movement_prob_hotspot = 0.10               # movement probability in the hot spot 
 
     x = np.empty(shape=(n_slots), dtype='float')
     y = np.empty(shape=(n_slots), dtype='float')
@@ -93,11 +94,12 @@ def generate_mobility_GM(x0=0, y0=0, n_slots=1000, slot_len=1, boundary=150, upp
             dire_dev_avg = direction_dev_avg_oob
             std_dir_dev = std_direction_dev_oob 
         
-        # movement_prob = movement_prob_hotspot if stop_wandering(x[slot-1], y[slot-1], upper_left, lower_right) == True else movement_prob_wandering 
-        if stop_wandering(x[slot-1], y[slot-1], upper_left, lower_right): 
-            movement_prob = movement_prob_hotspot
-        else: 
-            movement_prob = movement_prob_wandering
+        # # movement_prob = movement_prob_hotspot if stop_wandering(x[slot-1], y[slot-1], upper_left, lower_right) == True else movement_prob_wandering 
+        # if stop_wandering(x[slot-1], y[slot-1], upper_left, lower_right): 
+        #     movement_prob = movement_prob_hotspot
+        # else: 
+        #     movement_prob = movement_prob_wandering
+        movement_prob = movement_prob_wandering
         
         if rng.random() <= movement_prob:        # the user make a movement 
             speed[slot] = randomness_deg*speed[slot-1] + (1-randomness_deg)*speed_avg + \
@@ -115,36 +117,29 @@ def generate_mobility_GM(x0=0, y0=0, n_slots=1000, slot_len=1, boundary=150, upp
             direction_deg[slot] = direction_deg[slot-1]
             x[slot] = x[slot-1]
             y[slot] = y[slot-1]
-            
-        
         
     return (x,y)
 
 
 if __name__ == '__main__': 
-    n_slots = np.int32(1.0e3)                   # no. of slots 
-    boundary = 150 
-    x0, y0 = 10, -50
+    n_slots = np.int32(1.0e3)   # no. of slots 
+    boundary = 300 
+    x0, y0 = boundary-5, boundary-5            # initial location 
+    # x0, y0 = 0, 0
 
-    x, y = generate_mobility_GM(x0=x0, y0=y0, n_slots=n_slots, boundary=150)
+    x, y = generate_mobility_GM(x0=x0, y0=y0, n_slots=n_slots, boundary=boundary)
 
     """Plot real-time locations""" 
-    plt.figure(figsize=(5,5))    # figsize in inch 
-    plt.plot(x, y)
-    plt.plot(x[0], y[0], 'sr', label=f"initial location")
-    radius = boundary  # in meter
-    plt.plot(-radius, radius, 'sk')
-    plt.plot(-radius, -radius, 'sk')
-    plt.plot(radius, radius, 'sk')
-    plt.plot(radius, -radius, 'sk')
-    plt.legend()
-    plt.grid(True)
-    plt.xlabel('x (m)')
-    plt.ylabel('y (m)')
+    fig, ax = plt.subplots(figsize=(5,5))    # figsize in inch 
+    plt.plot(x, y); plt.plot(x[0], y[0], 'sr', label=f"initial location")
+    plt.legend(); plt.grid(True)
+    ax.set(xlabel='x (m)', ylabel='y (m)', title='Location of one user over time')
+    plt.xlim(-(boundary+5), boundary+5); plt.ylim(-(boundary+5),boundary+5)
     plt.show()
-    # plt.savefig(os.path.join(os.getcwd(), "mobility_model.jpg"))
     
     """Plot radius distance"""
     radius = np.sqrt(x**2 + y**2)       # shape = (n_slots,)
     plt.plot(radius)
+    plt.title('Radius distance (m)')
+    plt.grid(True)
     plt.show()
