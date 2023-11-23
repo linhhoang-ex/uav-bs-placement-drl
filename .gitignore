@@ -6,3 +6,7 @@ results-journal/
 results/
 xlsx/
 *.png 
+
+# test files 
+*test*.*
+test.ipynb
