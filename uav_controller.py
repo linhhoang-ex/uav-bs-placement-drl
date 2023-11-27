@@ -101,7 +101,7 @@ class UAV_Movement_Controller():
         ### The replay memory: heatmaps (users' statistics) -> uav movement control (dx, dy, dv)
         self.train_test_ratio = 0.8
         self.memory_size = 512         # maximum # of entries in the memory 
-        self.val_memory_size = 128     # replay memory for validation 
+        self.val_memory_size = 256     # replay memory for validation 
         self.min_samples_for_training = 256    # no. of samples >= the threshold -> start training 
         self.replay_memory_train = {'uav-location': np.zeros(shape=(self.memory_size, 3)),
                               'user-heatmaps': np.zeros(shape=(self.memory_size, self.n_grids, self.n_grids, self.n_channels)),
