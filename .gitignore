@@ -5,7 +5,8 @@ results-conference/
 results-journal/
 results/
 xlsx/
-*.png 
+*.png
+*.gif 
 
 # test files 
 *test*.*
