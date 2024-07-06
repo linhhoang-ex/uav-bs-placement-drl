@@ -11,3 +11,6 @@ xlsx/
 # test files 
 *test*.*
 test.ipynb
+
+# backup files
+to-be-deleted/
