@@ -71,8 +71,8 @@ Parameters for communications
 -----------------------------
 '''
 ref_receive_pw = dB(-40)                # reference received signal strength at 1 meter
-# bw_1user = MHz(1)                     # bandwidth for one user
-channel_bandwidth = MHz(30)             # total bandwith for all users, reference: 12 MHz for 5 users
+bw_per_user = MHz(0.3)                    # bandwidth for one user
+# channel_bandwidth = MHz(30)             # total bandwith for 100 users, reference: 12 MHz for 5 users
 pTx_downlink = mW(200)                  # transmit power (fixed) in mW of the UAV
 noise_pw_total = dBm(-90)               # total noise power
 
@@ -161,27 +161,35 @@ markers_uav = ['v', '*', '^', 'D', 'v', 'o', '^', 's', 'D', 'v']
 Parameters for reinforcement learning
 -------------------------------------
 '''
-n_grids = 25
-grid_size = int(2 * boundary / n_grids)     # IMPORTANT: expected shape of the DNN input: 25x25
+# n_grids = 25
+# grid_size = int(2 * boundary / n_grids)
+
+grid_size = 20      # split the target area into grids of size 20x20 m2
+n_grids = int(1 + np.floor((2 * boundary - 1) / grid_size))
+
 n_decisions = 10
 lyapunov_param = n_users * 500                      # parameter V in the Lyapunov framework
 # t_training_start = np.max([500, ON_duration_mean_tslot*2])
 t_training_start = 0
 training_interval = 5       # in time slots
 
-print(f'Coverage area (m): \t{2*boundary} x {2*boundary}')
+print(f'Target area (m): \t{2*boundary} x {2*boundary}')
 print(f'Grid size (m): \t\t{grid_size} x {grid_size}')
-print(f'Heat map image: \t{n_grids} x {n_grids}')
+print(f'Heatmap size: \t{n_grids} x {n_grids}')
 print('\n')
 
 
 # Normalization coefficients
-user_counter_norm = np.min([5.0, 20 * n_users / (n_grids * n_grids)])           # 30x the average no. of users in a grid
-queue_norm_Mb = 20 * np.max(ON_data_arrival_mean_Mb)          # in Mb
-ch_capacity_norm_Mb = 5 * np.max(ON_data_arrival_mean_Mb)     # 10x the arrival traffic [Mb] in a time slot
+n_users_per_grid = n_users / (n_grids * n_grids)
+user_counter_norm = np.max([5.0, 20 * n_users_per_grid])       # 20x the avg no. of users in a grid (min=5)
+queue_norm_Mb = 20 * n_users_per_grid * np.max(ON_data_arrival_mean_Mb)    # 20x the averge traffic of a grid (in Mb)
+ch_capacity_norm_Mb = user_counter_norm * np.max(ON_data_arrival_mean_Mb)   # 20x the arrival traffic [Mb] of a grid
 
-print(f'Normalization coefficients: \nuser counter norm (1 grid): \t{user_counter_norm:.1f} \nqueue_len_norm: \t{queue_norm_Mb} Mb \nch_capacity_norm: \t{ch_capacity_norm_Mb} Mb')
-print('\n')
+print("Normalization coefficients:")
+print(f"user counter norm (1 grid): \t{user_counter_norm:.1f}")
+print(f"queue_len_norm (1 grid): \t{queue_norm_Mb} Mb")
+print(f"ch_capacity_norm (1 grid): \t{ch_capacity_norm_Mb} Mb")
+print("\n")
 
 
 '''
@@ -189,7 +197,7 @@ print('\n')
 For exporting simulation data
 -----------------------------
 '''
-folder_name = f"test, n_slots={n_slots}, n_users={n_users}, n_uavs={n_uavs}, lambda={lambd_Mb:.1f} Mbps, W={channel_bandwidth/1e6:.0f} MHz, v_user_avg={speed_user_avg}, vxy_uav_max={uav_speedxy_max}, uOFF={OFF_duration_mean_tslot:.0f}, k={n_decisions}"
+folder_name = f"test, n_slots={n_slots}, n_users={n_users}, n_uavs={n_uavs}, lambda={lambd_Mb:.1f} Mbps, v_user_avg={speed_user_avg}, vxy_uav_max={uav_speedxy_max}, uOFF={OFF_duration_mean_tslot:.0f}, k={n_decisions}"
 
 sim_folder_path = os.path.join(os.getcwd(), "dev", folder_name)        # simulation output to be saved here
 

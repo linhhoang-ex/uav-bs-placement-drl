@@ -4,6 +4,7 @@ import seaborn as sns
 from IPython.display import Image
 from copy import deepcopy
 from sklearn.cluster import KMeans
+from scipy.optimize import linprog
 
 from channel_model import *
 from mobility_model import *
@@ -25,16 +26,16 @@ def cal_channel_capacity_Mb(channel_gain, alpha):
     '''
     Calculate channel capacity (Mb) in one time slot and spectral efficiency (bps/Hz).
 
-    Params:
+    ### Params
         - channel_gain: channel gain in real values (e.g., 1e-6 mW)
-        - alpha: bandwidth allocation, in range (0,1)
+        - alpha: bandwidth allocation, 0 (not allocated) or 1 (allocated)
 
-    Return:
+    ### Returns
         - capacity_Mb: the throughput/channel capacity (Mb) for one time slot
         - capacity_bpsHz: the spectral efficiency (bps/Hz)
     '''
     SNR = pTx_downlink * channel_gain / noise_pw_total
-    capacity_Mb = to_Mbit(alpha * channel_bandwidth * np.log2(1 + SNR) * slot_len)
+    capacity_Mb = to_Mbit(alpha * bw_per_user * np.log2(1 + SNR) * slot_len)
     capacity_bpsHz = np.log2(1 + SNR)
     return capacity_Mb, capacity_bpsHz
 
@@ -96,32 +97,106 @@ def load_user_properties(users_list, xaxis_all, yaxis_all, arrival_traffic_Mb, t
 
 
 '''
+----------------------------
+    Bandwidth Allocation
+----------------------------
+'''
+
+
+def allocate_bandwidth_linprog(load_Mb, chcapa_Mb_ref, mask, alpha_min):
+    '''
+    Optimize the bandwidth allocation based on the downlink load using linear programming
+
+    ### Params
+        load_Mb: Q_i(t) + A_i(t), shape=(n_users,)
+        chcapa_Mb_ref: shape=(n_users,), maximum drate if the user occupies the whole channel
+        mask: shape=(n_users,), denote active users of the considered cluster
+
+    ### Returns
+        alpha: the optimal bs allocation, shape=(n_users,), in range [0,1]
+
+    Reference: https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linprog.html
+    '''
+    n_users = len(mask)
+    c = (-1) * load_Mb * chcapa_Mb_ref * mask    # 1-D array
+    A_ub = np.ones(shape=(1, n_users))           # must be a 2-D array
+    b_ub = [1]                                   # 1-D array
+    bounds = [(alpha_min, 1) for i in range(0, n_users)]
+    options = {'maxiter': 100}
+    res = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds, options=options)
+    return res.x, res.status, res.nit, res.message
+
+
+def allocate_bandwidth_based_on_demand(load_Mb, mask):
+    '''
+    Greedily allocation the channel based on the downlink demand (Q_i(t) + A_i(t))
+
+    ### Params
+        load_Mb: the downlink demand, Q_i(t) + A_i(t), shape=(n_users,)
+        mask: shape=(n_users,), denote active users in the considered cluster
+
+    ### Returns
+        alpha: the optimal bs allocation, shape=(n_users,), in range [0,1]
+    '''
+    load_Mb_masked = load_Mb * mask
+    alpha = (load_Mb_masked) / np.sum(load_Mb_masked)
+
+    return alpha
+
+
+def allocate_bandwidth_equal_to_active_users(is_active_allusers):
+    alpha = is_active_allusers * 1 / np.sum(is_active_allusers)
+    return alpha
+
+
+def allocate_bandwidth_equal_fixed(n_users):
+    return np.ones(n_users) / n_users
+
+
+def allocate_bandwidth_limited(n_users):
+    return np.ones(n_users)
+
+
+'''
 ---------------------
     User Heatmap
 ---------------------
 '''
 
 
-def gen_heatmap(x_locations, y_locations, val, norm_val, n_grids=n_grids, grid_size=grid_size):
+def gen_heatmap(
+    x_locations, y_locations, val, norm_val,
+    n_grids=n_grids, grid_size=grid_size, boundary=boundary
+):
     '''
-    Generate a heatmap for the system statistic of interest
-    Parameters:
-        (x,y): the current location of each user, x.shape = y.shape = (n_users,)
-        val: the network statistic of interest, shape=(n_users,)
-        norm_val: the constant in support for normalizing the system statistic
-    Returns:
-        heatmap: shape = (n_grids, n_grids)
-    NOTE: the image's pixel should be as follows, (0,0)=top left corner
-    (0,0) (0,1) (0,2)
-    (1,0) (1,1) (1,2)
+    Generate a heatmap for the system statistic of interest.
+
+    The heatmap should have (0,0)=top left corner\\
+    (0,0) (0,1) (0,2)\\
+    (1,0) (1,1) (1,2)\\
     (2,0) (2,1) (2.2)
+
+    ### Parameters
+        (x, y): the current location of each user, x.shape = y.shape = (n_users,)
+        val: the network statistic of interest (e.g., queue size), shape=(n_users,)
+        norm_val: a coefficient for normalization
+
+    ### Returns
+        heatmap: shape = (n_grids, n_grids)
     '''
-    global boundary
-    heatmap = 1e-6 / norm_val * rng.uniform(size=(n_grids, n_grids))        # random noise
-    for user_id in range(x_locations.size):
-        col_id = int(np.minimum(2 * boundary - 1, x_locations[user_id] + boundary) / grid_size)  # in range 0 -> (n_grids-1)
-        row_id = int(np.minimum(2 * boundary - 1, boundary - y_locations[user_id]) / grid_size)  # in range 0 -> (n_grids-1)
-        heatmap[row_id, col_id] = heatmap[row_id, col_id] + val[user_id] / norm_val
+    heatmap = 1e-6 * rng.uniform(size=(n_grids, n_grids))        # random noise
+    x_locs = np.clip(x_locations, -boundary + 1, boundary - 1)
+    y_locs = np.clip(y_locations, -boundary + 1, boundary - 1)
+
+    for uid in range(x_locations.size):
+        # col = int(np.minimum(2 * boundary - 1, x_locs[uid] + boundary) / grid_size)  # in range 0 -> (n_grids-1)
+        # row = int(np.minimum(2 * boundary - 1, boundary - y_locs[uid]) / grid_size)  # in range 0 -> (n_grids-1)
+        col = int(np.floor((x_locs[uid] + boundary) / grid_size))
+        row = int(np.floor((boundary - y_locs[uid]) / grid_size))
+        heatmap[row, col] += val[uid]
+
+    heatmap /= norm_val     # normalization
+
     return heatmap
 
 
@@ -132,7 +207,8 @@ def create_image_heatmap(xaxis_all, yaxis_all, t, val_all, norm_val):
         val=val_all,
         norm_val=norm_val,
         n_grids=n_grids,
-        grid_size=grid_size
+        grid_size=grid_size,
+        boundary=boundary
     )
     fig, ax = plt.subplots(figsize=(5, 5))
     ax.imshow(heatmap, interpolation='hamming')
@@ -425,3 +501,27 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.savefig(os.path.join(sim_folder_path, 'uav-energy-model.png'))
     plt.show()
+
+    '''
+    Test bandwidth allocation using linear programming
+    '''
+    # n_users = 5
+    # load_Mb = np.array([50, 0, 30, 4, 1])   # np.arange(0,5)+10
+    # chcapa_Mb_ref = [1, 2, 1, 20, 1]
+    # mask = np.ones(shape=(n_users,))
+    # alpha_min = 0   # 1/(4*n_users)
+    # x, status, nit, message = allocate_bandwidth_linprog(load_Mb, chcapa_Mb_ref, mask, alpha_min)
+    # print(f'downlink traffic in Mb: {load_Mb}')
+    # print(f"bw allocation: {x}")
+    # print(f'status: {status}, {message}')
+    # print(f'# of iterations: {nit}')
+
+    '''
+    Test bandwidth allocation based on the downlink demand
+    '''
+    # n_users_test = 5
+    # load_Mb = np.array([50, 0, 30, 4, 1])
+    # mask = np.array([0, 1, 0, 0, 1])
+    # alpha_min = 0       # 1/(4*n_users)
+    # x = allocate_bandwidth_based_on_demand(load_Mb, mask)
+    # print(x)
