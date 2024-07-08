@@ -20,19 +20,22 @@ def check_out_of_boundary(x, y, boundary=150):
 
 
 def adjust_location(loc, bound=150):
-    ''' Force the location to be in in boundary in case the user move out of the boundary'''
-    if loc >= bound:
-        return bound
-    if loc <= -bound:
-        return -bound
-    return loc
+    ''' Adjust the user's position to be in the target area (-bound, bound).'''
+    # if loc >= bound:
+    #     return bound - 1
+    # if loc <= -bound:
+    #     return -bound + 1
+    # return loc
+
+    return np.clip(loc, -bound + 1, bound - 1)
 
 
 def adjust_altitude(z, zmin=50, zmax=150):
     ''' Force the UAV altitude within zmin and zmax'''
-    z = np.minimum(z, zmax)
-    z = np.maximum(z, zmin)
-    return z
+    # z = np.minimum(z, zmax)
+    # z = np.maximum(z, zmin)
+
+    return np.clip(z, zmin, zmax)
 
 
 def stop_wandering(x, y, upper_left, lower_right):
@@ -92,7 +95,7 @@ def generate_mobility_GM(x0=0, y0=0, n_slots=1000, slot_len=1, boundary=150, upp
             std_dir_dev = std_direction_dev
         else:
             dire_dev_avg = direction_dev_avg_oob
-            std_dir_dev = std_direction_dev_oob 
+            std_dir_dev = std_direction_dev_oob
 
         # # movement_prob = movement_prob_hotspot if stop_wandering(x[slot-1], y[slot-1], upper_left, lower_right) == True else movement_prob_wandering
         # if stop_wandering(x[slot-1], y[slot-1], upper_left, lower_right):
@@ -101,7 +104,7 @@ def generate_mobility_GM(x0=0, y0=0, n_slots=1000, slot_len=1, boundary=150, upp
         #     movement_prob = movement_prob_wandering
         movement_prob = movement_prob_wandering
 
-        if rng.random() <= movement_prob:        # the user make a movement 
+        if rng.random() <= movement_prob:        # the user make a movement
             speed[slot] = randomness_deg * speed[slot - 1] + (1 - randomness_deg) * speed_avg + \
                 np.sqrt(1 - randomness_deg**2) * rng.normal(loc=0, scale=std_speed)
             direction_dev_deg[slot] = randomness_deg * direction_dev_deg[slot - 1] + (1 - randomness_deg) * dire_dev_avg + \
