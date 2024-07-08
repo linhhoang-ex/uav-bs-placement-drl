@@ -5,11 +5,11 @@ import tensorflow as tf
 from tensorflow.keras.layers import (
     Input,
     Dense,
-    Conv2D,
     Flatten,
-    AveragePooling2D,
-    Concatenate
-    # MaxPooling2D
+    Concatenate,
+    # Conv2D,
+    # AveragePooling2D,
+    # MaxPooling2D,
 )
 from tensorflow.keras.regularizers import (
     # l1,
@@ -59,28 +59,6 @@ def update_UAV_location(x0, y0, dx, dy, speed=5, slot_len=1):
 def update_UAV_altitude(z0, dz, vz, slot_len=1):
     return z0 + dz * vz * slot_len
 
-# def gen_heatmap(x_locations, y_locations, val, norm_val):
-#     '''
-#     Generate a heatmap for the system statistic of interest
-#     Parameters:
-#         (x,y): the current location of each user, x.shape = y.shape = (n_users,)
-#         val: the network statistic of interest, shape=(n_users,)
-#         norm_val: the constant in support for normalizing the system statistic
-#     Returns:
-#         heatmap: shape = (n_grids, n_grids)
-#     NOTE: the image's pixel should be as follows, (0,0)=top left corner
-#     (0,0) (0,1) (0,2)
-#     (1,0) (1,1) (1,2)
-#     (2,0) (2,1) (2.2)
-#     '''
-#     global n_grids, grid_size, boundary
-#     heatmap = 1e-6/norm_val*rng.uniform(size=(n_grids, n_grids))        # random noise
-#     for user_id in range(x_locations.size):
-#         col_id = int(np.minimum(2*boundary-1,x_locations[user_id]+boundary)/grid_size)  # in range 0 -> (n_grids-1)
-#         row_id = int(np.minimum(2*boundary-1,boundary-y_locations[user_id])/grid_size)  # in range 0 -> (n_grids-1)
-#         heatmap[row_id, col_id] = heatmap[row_id, col_id] + val[user_id]/norm_val
-#     return heatmap
-
 
 class UAV_Movement_Controller():
     def __init__(self, boundary=250, grid_size=20, uav_speedxy_max=10, n_decisions=10, lr=1e-4, n_uavs=4, zmin=50, zmax=150, uav_speedz_max=5):
@@ -99,7 +77,7 @@ class UAV_Movement_Controller():
         # The DNN model
         self.n_channels = 1              # no. of user statistics passed to the DNN (queue, traffic, ch_capacity)
         self.n_outputs = 3               # output of the DNN model: dx, dy, dv
-        self.learning_rate = 5e-4                 # learning rate
+        self.learning_rate = 5e-4                   # learning rate
         self.regular_para = 1e-3                    # parameter for regularization
         self.model = self.build_dnn()               # initiate the DNN model
         self.batch_size_manual = 1000               # select a batch of samples for training in the case of manual batching
@@ -145,6 +123,7 @@ class UAV_Movement_Controller():
         col_scale = (uav_location[0] + self.boundary) / (2 * self.boundary)
         row_scale = (self.boundary - uav_location[1]) / (2 * self.boundary)
         alt_scale = uav_location[2] / self.zmax
+
         return np.array([row_scale, col_scale, alt_scale])
 
     def preprocess_user_statistics(self, user_locations, user_statistics, normalization_coeff, average=False):
@@ -158,12 +137,21 @@ class UAV_Movement_Controller():
             heatmap_all_statistics: a heatmap of all user statistics, as np.ndarray, shape=(n_grids, n_grids, n_channels)
         '''
         heatmap_all_statistics = np.zeros(shape=(self.n_grids, self.n_grids, len(user_statistics)))
-        hm_loc2 = self.gen_heatmap(user_locations[0], user_locations[1], np.ones(user_statistics[0].shape[0]), 1)   # heatmap: counting active users in a grid, not necessarily users of the cluster
+        hm_loc2 = self.gen_heatmap(
+            x_locations=user_locations[0],
+            y_locations=user_locations[1],
+            val=np.ones(user_statistics[0].shape[0]),
+            norm_val=1,
+        )   # heatmap: counting active users in a grid, not necessarily users of the cluster
 
         for id, statistic in enumerate(user_statistics):
             heatmap_all_statistics[:, :, id] = self.gen_heatmap(
-                x_locations=user_locations[0], y_locations=user_locations[1], val=statistic, norm_val=normalization_coeff[id]
+                x_locations=user_locations[0],
+                y_locations=user_locations[1],
+                val=statistic,
+                norm_val=normalization_coeff[id],
             )
+
             if average is True:
                 # average over all active users, avoid dividing by 0
                 heatmap_all_statistics[:, :, id] = heatmap_all_statistics[:, :, id] / np.where(hm_loc2 < 1, 1, hm_loc2)
@@ -202,36 +190,36 @@ class UAV_Movement_Controller():
         user_stats_heatmaps = Input(shape=(self.n_grids, self.n_grids, self.n_channels), name='user_stat_heatmaps')  # heatmaps of the users' statistics
         x = tf.reshape(user_stats_heatmaps, [-1, self.n_grids, self.n_grids, self.n_channels])
 
-        x = Conv2D(filters=32, kernel_size=3, strides=1, activation='relu')(x)
-        x = AveragePooling2D(pool_size=3, strides=2)(x)
-        x = Conv2D(filters=64, kernel_size=3, strides=1, activation='relu')(x)
-        x = AveragePooling2D(pool_size=3, strides=2)(x)
-        x = Conv2D(filters=128, kernel_size=3, strides=1, activation='relu')(x)
+        # --> Version 1.0: First submission
+        # x = Conv2D(filters=32, kernel_size=3, strides=1, activation='relu')(x)
         # x = AveragePooling2D(pool_size=3, strides=2)(x)
-        # x = Conv2D(filters=256, kernel_size=3, strides=1, activation='relu')(x)
+        # x = Conv2D(filters=64, kernel_size=3, strides=1, activation='relu')(x)
         # x = AveragePooling2D(pool_size=3, strides=2)(x)
+        # x = Conv2D(filters=128, kernel_size=3, strides=1, activation='relu')(x)
+        # x = Flatten()(x)
+        # x = Concatenate()([uav_location, x])
+        # x = Dense(units=512, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
+        # # x = Concatenate()([uav_location, x])
+        # x = Dense(units=256, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
+        # # x = Concatenate()([uav_location, x])
+        # x = Dense(units=128, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
+        # # x = Concatenate()([uav_location, x])
+        # x = Dense(units=9, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
 
-        # x = AveragePooling2D(pool_size=3, strides=2)(x)
-        # x = AveragePooling2D(pool_size=3, strides=2)(x)
-        # x = AveragePooling2D(pool_size=3, strides=2)(x)
-        # x = AveragePooling2D(pool_size=3, strides=2)(x)
-
+        # --> Version 2.0: Revision 1
         x = Flatten()(x)
         x = Concatenate()([uav_location, x])
-        x = Dense(units=512, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
-        # x = Concatenate()([uav_location, x])
-        x = Dense(units=256, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
-        # x = Concatenate()([uav_location, x])
-        x = Dense(units=128, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
-        # x = Concatenate()([uav_location, x])
-        x = Dense(units=9, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
+        x = Dense(units=64, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
+        x = Dense(units=64, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
 
         # the dnn outputs (vx, vy), i.e., the x-axis and y-axis velocity, vx and vy in range (-1,1)
         outputs = Dense(units=3, activation='tanh', name='vx_n_vy')(x)      # in range [-1,1], not sure that vx**2 + v_y**2 <= 1
 
-        model = tf.keras.Model(inputs=[uav_location, user_stats_heatmaps],
-                               outputs=outputs,
-                               name='uav_controller')
+        model = tf.keras.Model(
+            inputs=[uav_location, user_stats_heatmaps],
+            outputs=outputs,
+            name='uav_controller'
+        )
 
         model.compile(
             optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate),
@@ -342,11 +330,12 @@ class UAV_Movement_Controller():
         assert np.all(uav_location_scale <= 1) and np.all(uav_location_scale >= 0), \
             f"Error in scaling the UAV location, {uav_location_scale}"
 
-        # --> For testing the heatmap of one UAV
+        # --> Test the heatmap of one UAV: plotting in the jupyter cell
         # fig, ax = plt.subplots(figsize=(3, 3), dpi=300)
         # im = ax.imshow(user_heatmaps)
         # cb = plt.colorbar(im, fraction=0.046, pad=0.04)   # color bar
-        # plt.show() # plt.savefig('tet_heatmap.png')
+        # plt.show()
+        # plt.savefig('test_heatmap.png')
 
         # --> Step 2: Generate a set of potential decisions, must balance between exploration and exploitation
         # The first decision: purely based on the DNN output. The remaining (k-1) decisions: generated (noise-added) based on the DNN output
