@@ -56,22 +56,6 @@ def find_active_users(queue_len_Mb=0, incoming_traffic_Mb=0):
     return active_state
 
 
-def cal_bandwidth_equal(active_state):
-    '''
-    Equal bandwidth allocation for each active user.
-    Example: 5 out of 10 users are active -> allocate 1/5 of the total bandwidth to each
-    Parameters:
-        - active_state: shape = (n_users,), =1 if queue + traffic_arrival > 0
-    Returns:
-        - alpha: bandwidth allocation, in range (0,1), shape=(n_users,)
-    NOTE 2023/04/19: alpha = 1 for all users, since users are allocated fixed bandwidth during the process
-    '''
-    # alpha = np.ones(shape=(n_users)) * 1/n_users              # shape = (n_users,), equally shared between all users
-    # alpha = active_state*1/np.sum(active_state) + 1e-6        # shape = (n_users,), equally shared between active users
-    alpha = np.ones_like(active_state)
-    return alpha
-
-
 def update_queue_Mb(qlen_prev_Mb, arrival_Mb, departure_Mb):
     '''Return the updated qlen based on the previous qlen, arrival traffic, and departure rate'''
     qlen_next_Mb = np.max([qlen_prev_Mb + arrival_Mb - departure_Mb, 0])
@@ -153,8 +137,35 @@ def allocate_bandwidth_equal_fixed(n_users):
     return np.ones(n_users) / n_users
 
 
-def allocate_bandwidth_limited(n_users):
-    return np.ones(n_users)
+def allocate_bandwidth_limited(
+    mos: np.ndarray, cids: np.ndarray, n_channels: int, n_uavs: int
+):
+    '''
+    Allocate channels to users based on the downlink traffic.\\
+    If allocated a channel, each user obtains a fixed frequency bandwidth.\\
+    The # of channels that can be allocated by the UAV is limited.\\
+    The UAV priority users with low MOS to allocate channels.
+
+    ### Params
+        - mos: the current QoE of all users in the previous time slot
+        - cids: the cluster id of all users in the current time slot
+        - n_channels: # of channels for one UAV
+        - n_uavs: # of UAVs
+
+    ### Returns
+        - alpha: the channel allocation vector for all users (1 -> Yes, 0 -> No)
+    '''
+    alpha = np.zeros_like(mos)
+    for cid in range(n_uavs):
+        u_ids = np.where(cids == cid)[0]
+        if len(u_ids) <= n_channels:
+            alpha[u_ids] = 1
+        else:
+            mos_values = mos[u_ids]
+            allocated = np.argsort(mos_values)[:n_channels]
+            alpha[u_ids[allocated]] = 1
+
+    return alpha
 
 
 '''
@@ -370,88 +381,6 @@ def cal_uav_propulsion_energy(V=0):
 
 
 '''
---------------------------------
-    Initial location of UAVs
---------------------------------
-'''
-
-# Case 1: 4 UAVs start from edge points
-
-if n_uavs == 2:
-    init_locations_uav = np.array([
-        (-1, 1),        # UAV 1
-        (1, -1),        # UAV 2
-    ]) * boundary
-
-if n_uavs == 3:
-    init_locations_uav = np.array([
-        (0, 1),         # UAV 1
-        (-1, -1),       # UAV 2
-        (1, -1),        # UAV 3
-    ]) * boundary
-
-if n_uavs == 4:
-    init_locations_uav = np.array([
-        (-1, 1),        # UAV 1
-        (-1, -1),       # UAV 2
-        (1, -1),        # UAV 3
-        (1, 1)          # UAV 4
-    ]) * boundary
-
-if n_uavs == 5:
-    init_locations_uav = np.array([
-        (0, 1),         # UAV 1
-        (-1, 0),        # UAV 2
-        (1, 0),         # UAV 3
-        (-1, -1),       # UAV 4
-        (1, -1)         # UAV 5
-    ]) * boundary
-
-if n_uavs == 6:
-    init_locations_uav = np.array([
-        (-1, 1),        # UAV 1
-        (0, 1),         # UAV 2
-        (1, 1),         # UAV 3
-        (-1, -1),       # UAV 4
-        (0, -1),        # UAV 5
-        (1, -1)         # UAV 6
-    ]) * boundary
-
-if n_uavs == 7:
-    init_locations_uav = np.array([
-        (-1, 1),        # UAV 1
-        (0, 1),         # UAV 2
-        (1, 1),         # UAV 3
-        (-1, 0),        # UAV 4
-        (-1, -1),       # UAV 5
-        (0, -1),        # UAV 6
-        (1, -1)         # UAV 7
-    ]) * boundary
-
-if n_uavs == 8:
-    init_locations_uav = np.array([
-        (-1, 1),        # UAV 1
-        (-1, -1),       # UAV 2
-        (1, -1),        # UAV 3
-        (1, 1),         # UAV 4
-        (0, 1),         # UAV 5
-        (0, -1),        # UAV 6
-        (1, 0),         # UAV 7
-        (-1, 0)         # UAV 8
-    ]) * boundary
-
-
-# # Case 2: UAVs start at the first centroid (K-means clustering)
-# t=0
-# loc_users = np.hstack((np.expand_dims(xaxis_all[:,t], axis=1), np.expand_dims(yaxis_all[:,t], axis=1)))  # shape = (n_users, 3)
-# cmat, cids, c_centroids = kmeans_clustering(loc_users, n_clusters=n_uavs)
-# init_locations_uav = np.array(c_centroids)
-
-# Print to the terminal
-print("Initial location of UAVs:\n", init_locations_uav)
-
-
-'''
 ----------------------
     For testing
 ----------------------
@@ -470,7 +399,7 @@ if __name__ == '__main__':
         df_mos = pd.DataFrame({'qlen_Mb': qlen, 'arrival_rate_Mbps': lambda_, 'mos': mos})
         sns.lineplot(data=df_mos, x='qlen_Mb', y='mos')
 
-    df_mos.to_excel(os.path.join(sim_folder_path, 'mos-function.xlsx'))
+    df_mos.to_excel(os.path.join(sim_out_path, 'mos-function.xlsx'))
     print(df_mos.head(10))
 
     plt.grid(True)
@@ -480,7 +409,7 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.title(f"MOS vs Queue Length, Given Arrival Rate = {lambda_[0]} Mbps")
     plt.tight_layout()
-    plt.savefig(os.path.join(sim_folder_path, 'MOS-function.png'), bbox_inches='tight')
+    plt.savefig(os.path.join(sim_out_path, 'MOS-function.png'), bbox_inches='tight')
     plt.show()
 
     '''
@@ -499,29 +428,40 @@ if __name__ == '__main__':
     plt.title("UAV's propulsion energy model")
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(os.path.join(sim_folder_path, 'uav-energy-model.png'))
+    plt.savefig(os.path.join(sim_out_path, 'uav-energy-model.png'))
     plt.show()
 
     '''
     Test bandwidth allocation using linear programming
     '''
-    # n_users = 5
-    # load_Mb = np.array([50, 0, 30, 4, 1])   # np.arange(0,5)+10
-    # chcapa_Mb_ref = [1, 2, 1, 20, 1]
-    # mask = np.ones(shape=(n_users,))
-    # alpha_min = 0   # 1/(4*n_users)
-    # x, status, nit, message = allocate_bandwidth_linprog(load_Mb, chcapa_Mb_ref, mask, alpha_min)
-    # print(f'downlink traffic in Mb: {load_Mb}')
-    # print(f"bw allocation: {x}")
-    # print(f'status: {status}, {message}')
-    # print(f'# of iterations: {nit}')
+    n_users = 5
+    load_Mb = np.array([50, 0, 30, 4, 1])   # np.arange(0,5)+10
+    chcapa_Mb_ref = [1, 2, 1, 20, 1]
+    mask = np.ones(shape=(n_users,))
+    alpha_min = 0   # 1/(4*n_users)
+    x, status, nit, message = allocate_bandwidth_linprog(load_Mb, chcapa_Mb_ref, mask, alpha_min)
+    print(f'downlink traffic in Mb: {load_Mb}')
+    print(f"bw allocation: {x}")
+    print(f'status: {status}, {message}')
+    print(f'# of iterations: {nit}')
 
     '''
     Test bandwidth allocation based on the downlink demand
     '''
-    # n_users_test = 5
-    # load_Mb = np.array([50, 0, 30, 4, 1])
-    # mask = np.array([0, 1, 0, 0, 1])
-    # alpha_min = 0       # 1/(4*n_users)
-    # x = allocate_bandwidth_based_on_demand(load_Mb, mask)
-    # print(x)
+    n_users_test = 5
+    load_Mb = np.array([50, 0, 30, 4, 1])
+    mask = np.array([0, 1, 0, 0, 1])
+    alpha_min = 0       # 1/(4*n_users)
+    x = allocate_bandwidth_based_on_demand(load_Mb, mask)
+    print(x)
+
+    '''
+    Test bandwidth allocation based on the downlink demand
+    '''
+    alpha = allocate_bandwidth_limited(
+        mos=np.array([np.nan, 1, 3, 5, 4, 3]),
+        cids=np.array([0, 1, 0, 1, 1, 0]),
+        n_channels=2,
+        n_uavs=2,
+    )
+    print(alpha)
