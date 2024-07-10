@@ -7,8 +7,8 @@ from tensorflow.keras.layers import (
     Dense,
     Flatten,
     Concatenate,
-    # Conv2D,
-    # AveragePooling2D,
+    Conv2D,
+    AveragePooling2D,
     # MaxPooling2D,
 )
 from tensorflow.keras.regularizers import (
@@ -191,26 +191,26 @@ class UAV_Movement_Controller():
         x = tf.reshape(user_stats_heatmaps, [-1, self.n_grids, self.n_grids, self.n_channels])
 
         # --> Version 1.0: First submission
-        # x = Conv2D(filters=32, kernel_size=3, strides=1, activation='relu')(x)
-        # x = AveragePooling2D(pool_size=3, strides=2)(x)
-        # x = Conv2D(filters=64, kernel_size=3, strides=1, activation='relu')(x)
-        # x = AveragePooling2D(pool_size=3, strides=2)(x)
-        # x = Conv2D(filters=128, kernel_size=3, strides=1, activation='relu')(x)
-        # x = Flatten()(x)
-        # x = Concatenate()([uav_location, x])
-        # x = Dense(units=512, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
-        # # x = Concatenate()([uav_location, x])
-        # x = Dense(units=256, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
-        # # x = Concatenate()([uav_location, x])
-        # x = Dense(units=128, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
-        # # x = Concatenate()([uav_location, x])
-        # x = Dense(units=9, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
-
-        # --> Version 2.0: Revision 1
+        x = Conv2D(filters=32, kernel_size=3, strides=1, activation='relu')(x)
+        x = AveragePooling2D(pool_size=3, strides=2)(x)
+        x = Conv2D(filters=64, kernel_size=3, strides=1, activation='relu')(x)
+        x = AveragePooling2D(pool_size=3, strides=2)(x)
+        x = Conv2D(filters=128, kernel_size=3, strides=1, activation='relu')(x)
         x = Flatten()(x)
         x = Concatenate()([uav_location, x])
-        x = Dense(units=64, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
-        x = Dense(units=64, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
+        x = Dense(units=512, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
+        # x = Concatenate()([uav_location, x])
+        x = Dense(units=256, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
+        # x = Concatenate()([uav_location, x])
+        x = Dense(units=128, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
+        # x = Concatenate()([uav_location, x])
+        x = Dense(units=9, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
+
+        # --> Version 2.0: Revision 1
+        # x = Flatten()(x)
+        # x = Concatenate()([x, uav_location])
+        # x = Dense(units=64, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
+        # x = Dense(units=64, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
 
         # the dnn outputs (vx, vy), i.e., the x-axis and y-axis velocity, vx and vy in range (-1,1)
         outputs = Dense(units=3, activation='tanh', name='vx_n_vy')(x)      # in range [-1,1], not sure that vx**2 + v_y**2 <= 1
