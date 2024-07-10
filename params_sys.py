@@ -70,11 +70,12 @@ ss_min, ss_max = 0.67, 6                # in second, for the QoE model
 Parameters for communications
 -----------------------------
 '''
-ref_receive_pw = dB(-40)                # reference received signal strength at 1 meter
-bw_per_user = MHz(0.3)                    # bandwidth for one user
-# channel_bandwidth = MHz(30)             # total bandwith for 100 users, reference: 12 MHz for 5 users
-pTx_downlink = mW(200)                  # transmit power (fixed) in mW of the UAV
-noise_pw_total = dBm(-90)               # total noise power
+ref_receive_pw = dB(-40)        # reference received signal strength at 1 meter
+bw_per_user = MHz(0.3)          # bandwidth for one user, 30 MHz w/ 100 users
+# channel_bandwidth = MHz(30)   # total bandwith for 100 users
+pTx_downlink = mW(200)          # transmit power (fixed) in mW of the UAV
+noise_pw_total = dBm(-90)       # total noise power
+n_channels = int(2 * n_users / n_uavs)      # no. of channels reserved for 1 UAV
 
 
 '''
@@ -82,8 +83,8 @@ noise_pw_total = dBm(-90)               # total noise power
 Parameters for the mobility model for users
 -------------------------------------------
 '''
-boundary = 250              # reference: 250 m with 5 users
-speed_user_avg = 1          # m/s
+boundary = 250              # in meters
+speed_user_avg = 1          # meters per second
 
 initial_distance_range_x = range(-(boundary - 10), boundary - 10, 10)
 initial_distance_range_y = range(-(boundary - 10), boundary - 10, 10)
@@ -97,6 +98,12 @@ lower_right = (-(boundary - hotspot_range), boundary - hotspot_range)
 -------------------------------------
 Parameters for the data traffic model
 -------------------------------------
+
+web browsing: 3-5 Mbps (minmum) to 5-10 Mbps (recommended)
+video calls: 3-5 Mbps (minimum) to 10-20 Mbps (recommended)
+
+Ref: https://www.cnet.com/home/internet/how-much-internet-speed-do-you-really-need/
+
 '''
 
 # Case 1: UAV-BSs start at the initial centroids (K-means clustering), users are ON and OFF
@@ -112,7 +119,7 @@ Parameters for the data traffic model
 # OFF_duration_mean_tslot =  1                # in # of time slots
 
 # Case 2: UAV-BSs start at the four corners, users are always active
-lambd_Mb = 2                                # Mbps
+lambd_Mb = 2                # arrival traffic in Mbps
 ON_data_arrival_mean_Mb = [lambd_Mb]
 ON_duration_mean_tslot = n_slots            # in # of time slots
 OFF_duration_mean_tslot = 1                 # in # of time slots
@@ -157,6 +164,88 @@ markers_uav = ['v', '*', '^', 'D', 'v', 'o', '^', 's', 'D', 'v']
 
 
 '''
+--------------------------------
+    Initial location of UAVs
+--------------------------------
+'''
+
+# Case 1: 4 UAVs start from edge points
+
+if n_uavs == 2:
+    init_locations_uav = np.array([
+        (-1, 1),        # UAV 1
+        (1, -1),        # UAV 2
+    ]) * boundary
+
+if n_uavs == 3:
+    init_locations_uav = np.array([
+        (0, 1),         # UAV 1
+        (-1, -1),       # UAV 2
+        (1, -1),        # UAV 3
+    ]) * boundary
+
+if n_uavs == 4:
+    init_locations_uav = np.array([
+        (-1, 1),        # UAV 1
+        (-1, -1),       # UAV 2
+        (1, -1),        # UAV 3
+        (1, 1)          # UAV 4
+    ]) * boundary
+
+if n_uavs == 5:
+    init_locations_uav = np.array([
+        (0, 1),         # UAV 1
+        (-1, 0),        # UAV 2
+        (1, 0),         # UAV 3
+        (-1, -1),       # UAV 4
+        (1, -1)         # UAV 5
+    ]) * boundary
+
+if n_uavs == 6:
+    init_locations_uav = np.array([
+        (-1, 1),        # UAV 1
+        (0, 1),         # UAV 2
+        (1, 1),         # UAV 3
+        (-1, -1),       # UAV 4
+        (0, -1),        # UAV 5
+        (1, -1)         # UAV 6
+    ]) * boundary
+
+if n_uavs == 7:
+    init_locations_uav = np.array([
+        (-1, 1),        # UAV 1
+        (0, 1),         # UAV 2
+        (1, 1),         # UAV 3
+        (-1, 0),        # UAV 4
+        (-1, -1),       # UAV 5
+        (0, -1),        # UAV 6
+        (1, -1)         # UAV 7
+    ]) * boundary
+
+if n_uavs == 8:
+    init_locations_uav = np.array([
+        (-1, 1),        # UAV 1
+        (-1, -1),       # UAV 2
+        (1, -1),        # UAV 3
+        (1, 1),         # UAV 4
+        (0, 1),         # UAV 5
+        (0, -1),        # UAV 6
+        (1, 0),         # UAV 7
+        (-1, 0)         # UAV 8
+    ]) * boundary
+
+
+# # Case 2: UAVs start at the first centroid (K-means clustering)
+# t=0
+# loc_users = np.hstack((np.expand_dims(xaxis_all[:,t], axis=1), np.expand_dims(yaxis_all[:,t], axis=1)))  # shape = (n_users, 3)
+# cmat, cids, c_centroids = kmeans_clustering(loc_users, n_clusters=n_uavs)
+# init_locations_uav = np.array(c_centroids)
+
+# Print to the terminal
+print("Initial location of UAVs:\n", init_locations_uav)
+
+
+'''
 -------------------------------------
 Parameters for reinforcement learning
 -------------------------------------
@@ -173,9 +262,9 @@ lyapunov_param = n_users * 500                      # parameter V in the Lyapuno
 t_training_start = 0
 training_interval = 5       # in time slots
 
-print(f'Target area (m): \t{2*boundary} x {2*boundary}')
-print(f'Grid size (m): \t\t{grid_size} x {grid_size}')
-print(f'Heatmap size: \t{n_grids} x {n_grids}')
+print(f'Target area (m): {2*boundary} x {2*boundary}')
+print(f'Grid size (m): {grid_size} x {grid_size}')
+print(f'Heatmap size: {n_grids} x {n_grids}')
 print('\n')
 
 
@@ -194,18 +283,31 @@ print("\n")
 
 '''
 -----------------------------
-For exporting simulation data
+For importing/exporting simulation data
 -----------------------------
 '''
-folder_name = f"test, n_slots={n_slots}, n_users={n_users}, n_uavs={n_uavs}, lambda={lambd_Mb:.1f} Mbps, v_user_avg={speed_user_avg}, vxy_uav_max={uav_speedxy_max}, uOFF={OFF_duration_mean_tslot:.0f}, k={n_decisions}"
+# folder_name = f"test, n_slots={n_slots}, n_users={n_users}, n_uavs={n_uavs}, ld={lambd_Mb:.1f} Mbps, v_user_avg={speed_user_avg}, vxy_uav_max={uav_speedxy_max}, uOFF={OFF_duration_mean_tslot:.0f}, k={n_decisions}"
+folder_name = (
+    f"test, n_slots={n_slots}, "
+    f"n_users={n_users}, "
+    f"n_uavs={n_uavs}, "
+    f"ld={lambd_Mb:.1f} Mbps, "
+    f"v_user_avg={speed_user_avg}, "
+    f"vxy_uav_max={uav_speedxy_max}, "
+    f"uOFF={OFF_duration_mean_tslot:.0f}, "
+    f"k={n_decisions}"
+)
 
-sim_folder_path = os.path.join(os.getcwd(), "dev", folder_name)        # simulation output to be saved here
+sim_out_path = os.path.join(os.getcwd(), "dev", "sim-out", folder_name)        # simulation output to be saved here
+if os.path.exists(sim_out_path) is False:
+    os.mkdir(sim_out_path)
 
-if os.path.exists(sim_folder_path) is False:
-    os.mkdir(sim_folder_path)
+sim_in_path = os.path.join(os.getcwd(), 'dev', 'sim-in')
+if os.path.exists(sim_in_path) is False:
+    os.mkdir(sim_in_path)
 
-print(f'Folder for simulation outputs: {sim_folder_path}\n')
-
+print(f'Simulation inputs: {sim_in_path}')
+print(f'Simulation outputs: {sim_out_path}\n')
 
 '''
 ----------
@@ -213,4 +315,4 @@ For teting
 ----------
 '''
 if __name__ == '__main__':
-    print(sim_folder_path)
+    print(sim_out_path)
