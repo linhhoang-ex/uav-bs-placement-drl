@@ -17,6 +17,9 @@ from tensorflow.keras.regularizers import (
     # l1_l2
 )
 
+from params_sys import *
+from utils_sys import *
+
 rng = np.random.default_rng()
 mse = tf.keras.losses.MeanSquaredError()
 
@@ -61,15 +64,19 @@ def update_UAV_altitude(z0, dz, vz, slot_len=1):
 
 
 class UAV_Movement_Controller():
-    def __init__(self, boundary=250, grid_size=20, uav_speedxy_max=10, n_decisions=10, lr=1e-4, n_uavs=4, zmin=50, zmax=150, uav_speedz_max=5):
+    def __init__(
+        self, boundary=250, grid_size=20, uav_speedxy_max=10, n_decisions=10,
+        lr=1e-4, n_uavs=4, zmin=50, zmax=150, uav_speedz_max=5,
+        std_var_vxvyvz_explore=0.5, std_var_vxvyvz_exploit=0.1
+    ):
         self.boundary = boundary        # the boundary of the UAV-covered region, in meters
         self.grid_size = grid_size      # resolution of the heatmap, e.g., grid_size = 10 -> 10x10(m) grids
         self.n_grids = int((2 * boundary) / grid_size)      # no. of grids in each vertical and horizontal axis
         self.uav_speedxy_max = uav_speedxy_max          # in m/s
         self.uav_speedz_max = uav_speedz_max            # in m/s
-        self.n_decisions = n_decisions                  # no. of generated decisions output by the actor module
-        self.std_var_vxvyvz_explore = 0.1
-        self.std_var_vxvyvz_exploit = 0.1
+        self.n_decisions = n_decisions
+        self.std_var_vxvyvz_explore = std_var_vxvyvz_explore
+        self.std_var_vxvyvz_exploit = std_var_vxvyvz_exploit
         self.n_uavs = n_uavs
         self.zmin = zmin
         self.zmax = zmax
@@ -126,25 +133,33 @@ class UAV_Movement_Controller():
 
         return np.array([row_scale, col_scale, alt_scale])
 
-    def preprocess_user_statistics(self, user_locations, user_statistics, normalization_coeff, average=False):
+    def preprocess_user_statistics(
+        self, user_locations, user_statistics, normalization_coeff, average=False
+    ) -> np.ndarray:
         '''
         Generate heatmaps of all system statistics, including normalization
-        Parameters:
-            user_locations: current locations of users, a tupple of (x_locations, y_locations), x_locations.shape = (n_users,)
-            user_statistics: all statistics of users, a tupple of (queue_Mb, traffic_Mb, ch_capacity_Mb)
-            normalization_coeff: normalization coefficients, a tupple of (queue_coeff_Mb, traffic_coeff_Mb, ch_capacity_coeff_Mb), queue_coeff_Mb.shape=(n_users,)
-        Returns:
-            heatmap_all_statistics: a heatmap of all user statistics, as np.ndarray, shape=(n_grids, n_grids, n_channels)
+
+        Params
+        ------
+        - user_locations: current locations of users, a tupple of (x_locs, y_locs), x_locs.shape = (n_users,)
+        - user_statistics: (downlink_load_masked, queue_length_Mb_masked, incoming_traffic_Mb_masked, ld_Mbps)
+        - normalization_coeff: normalization coefficients, (queue_coeff_Mb, traffic_coeff_Mb, ch_capacity_coeff_Mb)
+
+        Returns
+        -------
+            heatmap_all_statistics: a heatmap of user statistics, shape=(n_grids, n_grids, n_channels)
         '''
-        heatmap_all_statistics = np.zeros(shape=(self.n_grids, self.n_grids, len(user_statistics)))
+        stats = [user_statistics[0]]    # only consider the first stats (laod = qlen + new traffic)
+        heatmap_all_statistics = np.zeros(shape=(self.n_grids, self.n_grids, len(stats)))
+
         hm_loc2 = self.gen_heatmap(
             x_locations=user_locations[0],
             y_locations=user_locations[1],
-            val=np.ones(user_statistics[0].shape[0]),
+            val=np.ones(stats[0].shape[0]),
             norm_val=1,
         )   # heatmap: counting active users in a grid, not necessarily users of the cluster
 
-        for id, statistic in enumerate(user_statistics):
+        for id, statistic in enumerate(stats):
             heatmap_all_statistics[:, :, id] = self.gen_heatmap(
                 x_locations=user_locations[0],
                 y_locations=user_locations[1],
@@ -187,7 +202,11 @@ class UAV_Movement_Controller():
         '''Build the DNN model'''
         uav_location = Input(shape=(3,), name='uav_location')      # the current UAV location, x_uav and y_uav
 
-        user_stats_heatmaps = Input(shape=(self.n_grids, self.n_grids, self.n_channels), name='user_stat_heatmaps')  # heatmaps of the users' statistics
+        user_stats_heatmaps = Input(
+            shape=(self.n_grids, self.n_grids, self.n_channels),
+            name='user_stat_heatmaps'
+        )  # heatmaps of the users' statistics
+
         x = tf.reshape(user_stats_heatmaps, [-1, self.n_grids, self.n_grids, self.n_channels])
 
         # --> Version 1.0: First submission
@@ -291,7 +310,7 @@ class UAV_Movement_Controller():
 
     def make_movement_decision(
         self, uav_location, user_locations, user_statistics, normalization_coeff,
-        mask, incoming_traffic_Mb_masked, bw_alloc_all
+        mask, bw_alloc_all, vqlen_prop: float
     ):
         '''
         Given the UAV's location and heatmaps of all user statistics:
@@ -303,10 +322,11 @@ class UAV_Movement_Controller():
         Parameters:
             - uav_location: a tupple of (x_uav, y_uav, z_uav)
             - user_locations: current location of each users, a tupple of (x_locations, y_locations), x_locations.shape = (n_users,)
-            - user_statistics: all statistics of users, a tupple of (queue_Mb, traffic_Mb, ch_capacity_Mb)
+            - user_statistics: all statistics of users, as a tupple of (downlink_load_masked, queue_length_Mb, incoming_traffic_Mb_masked)
             - normalization_coeff: normalization coefficients, a tupple of (queue_coeff_Mb, traffic_coeff_Mb, ch_capacity_coeff_Mb), queue_coeff_Mb.shape=(n_users,)
             - mask: shape=(n_users,), =1 if user is active and belongs to the current cluster
             - incoming_traffic_Mb_masked: shape=(n_users,), incoming traffic of users, A_i(t)
+            - vqlen_prop: the current state of the virtual queue for controlling the UAV's propulsion energy
 
         Returns:
             - prediction: the DNN output, shape=(2,)
@@ -340,7 +360,8 @@ class UAV_Movement_Controller():
         # --> Step 2: Generate a set of potential decisions, must balance between exploration and exploitation
         # The first decision: purely based on the DNN output. The remaining (k-1) decisions: generated (noise-added) based on the DNN output
         dnn_prediction = self.model.predict(
-            [tf.expand_dims(uav_location_scale, axis=0), tf.expand_dims(user_heatmaps, axis=0)],
+            [tf.expand_dims(uav_location_scale, axis=0),
+             tf.expand_dims(user_heatmaps, axis=0)],
             verbose=0
         )
         dnn_prediction = np.array(dnn_prediction).flatten()             # shape = (3,)
@@ -377,8 +398,10 @@ class UAV_Movement_Controller():
         lyapunov_fval_logs = list()             # log all lyapunov function values of each decision
         for decision_id in range(self.n_decisions):
             fval = self.evaluate_decision(
-                uav_location, user_locations, user_statistics, ready_decisions[decision_id],
-                mask, incoming_traffic_Mb_masked, bw_alloc_all
+                uav_location, user_locations, user_statistics,
+                ready_decisions[decision_id],
+                mask, bw_alloc_all,
+                vqlen_prop
             )
             lyapunov_fval_logs.append(fval)
         id_best = np.argmin(lyapunov_fval_logs)     # index of the best decision
@@ -391,51 +414,71 @@ class UAV_Movement_Controller():
 
         # --> Step 4: Update the replay memory and conduct validation test
         self.update_replay_memory(
-            uav_location_scale=uav_location_scale, user_heatmaps=user_heatmaps, uav_movement_decision=best_dnn_decision
+            uav_location_scale=uav_location_scale,
+            user_heatmaps=user_heatmaps,
+            uav_movement_decision=best_dnn_decision
         )
 
         return (dnn_prediction, best_ready_decision)
 
     def evaluate_decision(
-        self, uav_location, user_locations, user_statistics, ready_decision, mask,
-        incoming_traffic_Mb_masked, bw_alloc_all
+        self, uav_location, user_locations, user_statistics, ready_decision,
+        mask, bw_alloc_all, vqlen_prop: np.ndarray
     ):
         '''
-        Parameters:
-            uav_location=(x_uav, y_uav): python tuple, x_uav and y_uav in range (-boundary, boundary)
-            user_locations: a tupple of (x_locations, y_locations), x_locations.shape = (n_users,)
-            user_statistics: a tupple of (queue_Mb, traffic_Mb, ch_capacity_Mb), queue_Mb.shape=(n_users,)
-            ready_decision=[dx, dy, v]: type=np.ndarray, dx**2 + dy**2 = 1, 0 <= uav_speed <=uav_speed_max
-        Returns:
-            fval: Lyapunov-drift-plus-penalty function value of the given decision
+        Params
+        ------
+        - uav_location=(x_uav, y_uav): python tuple, x_uav and y_uav in range (-boundary, boundary)
+        - user_locations: a tupple of (x_locations, y_locations), x_locations.shape = (n_users,)
+        - user_statistics = (downlink_load_masked, queue_length_Mb, incoming_traffic_Mb_masked)
+        - ready_decision=[dx, dy, vxy, dz, vz]: dx**2 + dy**2 = 1, 0 <= uav_speed <=uav_speed_max
+        - vqlen_prop: the current state of the virtual queue for the UAV's propulsion power
+
+        Returns
+        -------
+        - fval: Lyapunov-drift-plus-penalty function value of the given decision
         '''
         dx, dy, vxy, dz, vz = ready_decision
         x_uav, y_uav = update_UAV_location(x0=uav_location[0], y0=uav_location[1], dx=dx, dy=dy, speed=vxy)
         z_uav = update_UAV_altitude(z0=uav_location[2], dz=dz, vz=vz)
         x_users, y_users = user_locations[0], user_locations[1]
-        downlink_load_Mb = user_statistics[0]            # downlink load = queue length + incoming traffic, shape=(n_users,)
+        downlink_load_Mb_masked, queue_length_Mb_masked, incoming_traffic_Mb_masked, ld_Mbps = user_statistics
         n_users = len(x_users)
         ch_capacity_Mb = np.zeros(shape=(n_users,))
         for id in range(n_users):
             ch_gain = self.cal_channel_fading_gain(x_users[id], y_users[id], x_uav, y_uav, z_uav)
-            ch_capacity_Mb[id] = self.cal_channel_capacity_Mb(channel_gain=ch_gain, alpha=bw_alloc_all[id])[0]   # equal bandwidth allocation
+            ch_capacity_Mb[id] = self.cal_channel_capacity_Mb(channel_gain=ch_gain, alpha=bw_alloc_all[id])[0]
+        ch_capacity_Mb_masked = ch_capacity_Mb * mask
 
-        # fval = (-1)*np.sum(load_Mb*ch_capacity_Mb + self.Vlya * np.minimum(load_Mb, ch_capacity_Mb))      # old fval, worked well
-        f1 = (-1) * np.sum(downlink_load_Mb * ch_capacity_Mb)
-        qlen_new = downlink_load_Mb - ch_capacity_Mb
+        # for controlling the user's downlink queue
+        f1 = np.sum(
+            queue_length_Mb_masked * (incoming_traffic_Mb_masked - ch_capacity_Mb_masked)
+        )       # f1 = (-1) * np.sum(downlink_load_Mb * ch_capacity_Mb)
+
+        # for controlling the UAV's propulsion energy
+        velocity_uavs = np.array(np.sqrt(vxy**2 + vz**2))
+        pw_prop = cal_uav_propulsion_energy(velocity_uavs)[0]
+        f2 = vqlen_prop * (pw_prop - PW_THRES)
+
+        # for maximizing the objective function
+        qlen_new = downlink_load_Mb_masked - ch_capacity_Mb_masked
         qlen_new = np.where(qlen_new > 0, qlen_new, 0)          # shape=(n_users,)
         mos = np.zeros(shape=(n_users,))
         for uid in range(0, n_users):
             if mask[uid] == True:
-                mos[uid] = self.mos_func(qlen_new[uid], incoming_traffic_Mb_masked[uid])
+                mos[uid] = self.mos_func(qlen_new[uid], ld_Mbps[uid])
             else:
                 mos[uid] = np.nan
-        f2 = (-1) * self.Vlya * np.nanmean(mos)
-        fval = f1 + f2
+        f3 = (-1) * self.Vlya * np.nanmean(mos)
+
+        # summing up for the overall objective function
+        fval = f1 / QLEN_SCALE + f2 / VQPW_SCALE + f3
 
         # add a penalty if the UAV moving out of the operation zone
+        # NOTE: the optimization is minimization, thus the penalty should be positive
         indicator = 1 if (z_uav < self.zmin) or (z_uav > self.zmax) else 0
-        fval += indicator * 1e6       # NOTE: the optimization is minimization, thus the penalty should be positive
+        indicator = indicator or check_out_of_boundary(x_uav, y_uav, boundary)
+        fval += indicator * 1e3
 
         return fval
 
