@@ -101,22 +101,36 @@ def load_data(filepath):
         print("Error during unpickling object (Possibly unsupported):", ex)
 
 
-def export_moving_average(raw_data, rolling_intv=1):
+def export_moving_average(raw_data, rolling_intv=1, min_periods=1):
     df = pd.DataFrame(np.asarray(raw_data))
-    y_axis = np.hstack(df.rolling(window=rolling_intv, min_periods=1).mean().values)
+    y_axis = np.hstack(
+        df.rolling(
+            window=rolling_intv,
+            min_periods=min_periods
+        ).mean().values
+    )
 
     return y_axis
 
 
-def export_moving_min(raw_data, rolling_intv=1):
+def export_moving_min(raw_data, rolling_intv=1, min_periods=1):
     df = pd.DataFrame(np.asarray(raw_data))
-    y_axis = np.hstack(df.rolling(window=rolling_intv, min_periods=1).min().values)
+    y_axis = np.hstack(
+        df.rolling(
+            window=rolling_intv, min_periods=min_periods
+        ).min().values
+    )
 
     return y_axis
 
 
-def export_moving_max(raw_data, rolling_intv=1):
+def export_moving_max(raw_data, rolling_intv=1, min_periods=1):
     df = pd.DataFrame(np.asarray(raw_data))
-    y_axis = np.hstack(df.rolling(window=rolling_intv, min_periods=1).max().values)
+    y_axis = np.hstack(
+        df.rolling(
+            window=rolling_intv,
+            min_periods=min_periods
+        ).max().values
+    )
 
     return y_axis
