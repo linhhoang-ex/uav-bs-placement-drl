@@ -14,9 +14,9 @@ def rad2deg(rad):
     return rad * 180 / np.pi
 
 
-def check_out_of_boundary(x, y, boundary=150):
-    '''Return True if the location (x,y) is out of the area'''
-    return True if np.abs(x) >= boundary or np.abs(y) >= boundary else False
+def check_out_of_boundary(x, y, boundary: float = 250):
+    '''Return True if the location (x,y) is out of the area.'''
+    return True if np.abs(x) > boundary or np.abs(y) > boundary else False
 
 
 def adjust_location(loc, bound=150):
