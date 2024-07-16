@@ -49,7 +49,7 @@ def plt_uav_trajectory(uavs, name):
     ax.set(xlim=(-boundary, boundary), ylim=(-boundary, boundary), aspect='equal')
     plt.grid(True, linestyle=':')
     plt.legend()
-    plt.savefig(os.path.join(sim_folder_path, f'uav-trajectory-{name}.png'))
+    plt.savefig(os.path.join(sim_out_path, f'uav-trajectory-{name}.png'))
     plt.show()
 
 
@@ -76,7 +76,11 @@ def gen_image_with_clusters(xaxis_all, yaxis_all, uavswarm, t, folder_name, mark
     plt.close()
 
 
-def gen_image_with_clusters_3D(xaxis_all, yaxis_all, uavswarm, t, folder_name, marker_sz, color_codes, markers, alphas, dpi=72, figsize=(6, 6)):
+def gen_image_with_clusters_3D(
+    xaxis_all, yaxis_all, uavswarm, t,
+    folder_name, marker_sz, color_codes, markers,
+    alphas, dpi=72, figsize=(6, 6), pdf=False
+):
     fig = plt.figure(figsize=figsize)    # figsize in inch
     ax = fig.add_subplot(111, projection='3d')
 
@@ -86,28 +90,37 @@ def gen_image_with_clusters_3D(xaxis_all, yaxis_all, uavswarm, t, folder_name, m
                    edgecolors=color_codes[id], color='none', s=s_, alpha=alphas[id])   # linewidths
 
     for id, uav in enumerate(uavswarm):
-        s_ = marker_sz  # 4*marker_sz if markers_cluster[id] == '^' else 3*marker_sz
+        s_ = 3 * marker_sz if markers[id] == '^' else 2 * marker_sz
         zvec = uav.z[t] * np.arange(0, 0.99, 0.98)
         xvec = uav.x[t] * np.ones(2)
         yvec = uav.y[t] * np.ones(2)
         ax.scatter(uav.x[t], uav.y[t], uav.z[t], linestyle='None', marker=markers_cluster[id], label=uav.name,
                    edgecolors=colors[id], color='none', s=s_, linewidths=1)
-        ax.scatter(uav.x[t], uav.y[t], uav.z[t], marker='1', s=40, linewidths=1)    # edgecolors=colors[id]
-        ax.text(uav.x[t] + 5, uav.y[t] + 5, uav.z[t] + 5, uav.name[:5] + f' ({uav.z[t]:.0f}m)')
+        ax.scatter(uav.x[t], uav.y[t], uav.z[t], marker='1', s=30, linewidths=1)    # edgecolors=colors[id]
+        kwargs = {'fontsize': 'medium'}
+        ax.text(uav.x[t] + 5, uav.y[t] + 5, uav.z[t] + 5, uav.name[:5] + f' ({uav.z[t]:.0f}m)', **kwargs)
         ax.plot(xvec, yvec, zvec, linestyle='--', linewidth=1, dashes=(5, 5), alpha=0.7)  # dashes=(length,interval_length)
 
     ax.view_init(elev=15)  # azim=120
     ax.set_box_aspect([1, 1, 0.6])        # ax.set_aspect('auto')
     ax.xaxis.set_major_locator(ticker.LinearLocator(5))
     ax.yaxis.set_major_locator(ticker.LinearLocator(5))
-    ax.zaxis.set_major_locator(ticker.LinearLocator(4))
+    ax.zaxis.set_major_locator(ticker.LinearLocator(5))
     ax.set(xlim=(-boundary, boundary), ylim=(-boundary, boundary), zlim=(0, z_max))
-    ax.set(xlabel='x (m)', ylabel='y (m)', zlabel='z (m)')
+
+    # ax.set(xlabel='x (m)', ylabel='y (m)', zlabel='z (m)')
+    ax.set_xlabel('x (m)', fontsize='large')
+    ax.set_ylabel('y (m)', fontsize='large')
+    ax.set_zlabel('z (m)', fontsize='large')
+    ax.tick_params(labelsize='large')
     ax.set_title(label=f'time = {t} / {n_slots-1} (s)', fontdict={'color': 'red'}, y=0.95)
     # ax.legend(loc='best', ncol=2)       # options: 'best', 'upper left', 'upper right', 'lower left', 'lower right', bbox_to_anchor=(1.02, 0.2)
-    # ax.grid(visible=True, linestyle='--') # not working on 3d plots
+    # ax.grid(visible=True, linestyle='--', alpha=0.2) # not working on 3d plots
     fig.tight_layout()
-    plt.savefig(os.path.join(os.getcwd(), folder_name, f"t{t}.png"), dpi=dpi, bbox_inches='tight', pad_inches=0.5)
+    if pdf is False:
+        plt.savefig(os.path.join(os.getcwd(), folder_name, f"t{t}.png"), dpi=dpi, bbox_inches='tight', pad_inches=0.5)
+    else:
+        plt.savefig(os.path.join(os.getcwd(), folder_name, f"t{t}.pdf"), bbox_inches='tight', pad_inches=0.5)
     plt.close()
 
 
