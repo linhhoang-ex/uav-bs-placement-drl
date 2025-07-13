@@ -163,18 +163,24 @@ class UAV_Movement_Controller():
 
         # The replay memory: heatmaps (users' statistics) -> uav movement control (dx, dy, dv)
         self.train_test_ratio = 0.8
-        self.memory_size = 512         # maximum # of entries in the memory
-        self.val_memory_size = 256     # replay memory for validation
+        self.memory_size = 1024         # maximum # of entries in the memory
+        self.val_memory_size = 1024     # replay memory for validation
         self.min_samples_for_training = 256    # no. of samples >= the threshold -> start training
         self.replay_memory_train = {
             'uav-location': np.zeros(shape=(self.memory_size, 3)),
-            'user-heatmaps': np.zeros(shape=(self.memory_size, self.n_grids, self.n_grids, self.n_channels)),
+            'uav-vqlen-prop-pw': np.zeros(shape=(self.memory_size, 1)),
+            'user-heatmaps': np.zeros(
+                shape=(self.memory_size, self.n_grids, self.n_grids, self.n_channels)
+            ),
             'best-action': np.zeros(shape=(self.memory_size, self.n_outputs))
         }
         self.memory_counter_train = 0     # store how many entries have been recorded so far
         self.replay_memory_val = {
             'uav-location': np.zeros(shape=(self.val_memory_size, 3)),
-            'user-heatmaps': np.zeros(shape=(self.val_memory_size, self.n_grids, self.n_grids, self.n_channels)),
+            'uav-vqlen-prop-pw': np.zeros(shape=(self.memory_size, 1)),
+            'user-heatmaps': np.zeros(
+                shape=(self.val_memory_size, self.n_grids, self.n_grids, self.n_channels)
+            ),
             'best-action': np.zeros(shape=(self.val_memory_size, self.n_outputs))
         }
         self.memory_counter_val = 0
@@ -266,12 +272,13 @@ class UAV_Movement_Controller():
 
     def build_dnn(self):
         '''Build the DNN model'''
-        uav_location = Input(shape=(3,), name='uav_location')      # the current UAV location, x_uav and y_uav
+        uav_location = Input(shape=(3,), name='uav_location')   # 3D: x, y, z
+        uav_prop_pw = Input(shape=(1,), name='prop_power')  # vqlen for controlling the prop pw
 
         user_stats_heatmaps = Input(
             shape=(self.n_grids, self.n_grids, self.n_channels),
             name='user_stat_heatmaps'
-        )  # heatmaps of the users' statistics
+        )  # heatmaps of the users' statistics, n_channels = # of features
 
         x = tf.reshape(user_stats_heatmaps, [-1, self.n_grids, self.n_grids, self.n_channels])
 
@@ -282,18 +289,15 @@ class UAV_Movement_Controller():
         x = AveragePooling2D(pool_size=3, strides=2)(x)
         x = Conv2D(filters=128, kernel_size=3, strides=1, activation='relu')(x)
         x = Flatten()(x)
-        x = Concatenate()([uav_location, x])
+        x = Concatenate()([uav_location, uav_prop_pw, x])
         x = Dense(units=512, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
-        # x = Concatenate()([uav_location, x])
         x = Dense(units=256, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
-        # x = Concatenate()([uav_location, x])
         x = Dense(units=128, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
-        # x = Concatenate()([uav_location, x])
         x = Dense(units=9, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
 
         # --> Version 2.0: Revision 1
         # x = Flatten()(x)
-        # x = Concatenate()([x, uav_location])
+        # x = Concatenate()([x, uav_location, uav_prop_pw])
         # x = Dense(units=64, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
         # x = Dense(units=64, activation='relu', kernel_regularizer=l2(self.regular_para))(x)
 
@@ -301,7 +305,7 @@ class UAV_Movement_Controller():
         outputs = Dense(units=3, activation='tanh', name='vx_n_vy')(x)      # in range [-1,1], not sure that vx**2 + v_y**2 <= 1
 
         model = tf.keras.Model(
-            inputs=[uav_location, user_stats_heatmaps],
+            inputs=[uav_location, uav_prop_pw, user_stats_heatmaps],
             outputs=outputs,
             name='uav_controller'
         )
@@ -328,9 +332,17 @@ class UAV_Movement_Controller():
         train_sample_ids = np.arange(stop=np.minimum(self.memory_counter_train, self.memory_size))
         val_sample_ids = np.arange(stop=np.minimum(self.memory_counter_val, self.val_memory_size))
 
-        X_train = [self.replay_memory_train['uav-location'][train_sample_ids], self.replay_memory_train['user-heatmaps'][train_sample_ids]]
+        X_train = [
+            self.replay_memory_train['uav-location'][train_sample_ids],
+            self.replay_memory_train['uav-vqlen-prop-pw'][train_sample_ids],
+            self.replay_memory_train['user-heatmaps'][train_sample_ids]
+        ]
         y_train = self.replay_memory_train['best-action'][train_sample_ids]
-        X_val = [self.replay_memory_val['uav-location'][val_sample_ids], self.replay_memory_val['user-heatmaps'][val_sample_ids]]
+        X_val = [
+            self.replay_memory_val['uav-location'][val_sample_ids],
+            self.replay_memory_val['uav-vqlen-prop-pw'][val_sample_ids],
+            self.replay_memory_val['user-heatmaps'][val_sample_ids]
+        ]
         y_val = self.replay_memory_val['best-action'][val_sample_ids]
 
         # --> train the DNN
@@ -349,12 +361,18 @@ class UAV_Movement_Controller():
         self.train_loss_history.append(train_loss)
         self.val_loss_history.append(val_loss)
 
-    def update_replay_memory(self, uav_location_scale, user_heatmaps, uav_movement_decision):
+    def update_replay_memory(
+        self, uav_location_scale, user_heatmaps, uav_movement_decision,
+        uav_vqlen_prop_pw_scale
+    ):
         '''
         Function:
+        --------
             - Replay the old entries with new entries in the replay memory
             - Re-train the DNN periodically
+
         Parameters:
+        ----------
             uav_location: shape=(2,), x_uav and y_uav in range (0,1)
             user_heatmaps: shape=(n_grids, n_grids, n_channels=3)
             uav_movement: shape=(3,), which are dx, dy, and dv
@@ -371,6 +389,7 @@ class UAV_Movement_Controller():
             replay_memory = self.replay_memory_val
             self.memory_counter_val += 1
         replay_memory['uav-location'][sample_id] = uav_location_scale
+        replay_memory['uav-vqlen-prop-pw'][sample_id] = uav_vqlen_prop_pw_scale
         replay_memory['user-heatmaps'][sample_id] = user_heatmaps
         replay_memory['best-action'][sample_id] = uav_movement_decision
 
@@ -386,6 +405,7 @@ class UAV_Movement_Controller():
         - Step 4: update the replay memory
 
         Parameters:
+        ----------
             - uav_location: a tupple of (x_uav, y_uav, z_uav)
             - user_locations: current location of each users, a tupple of (x_locations, y_locations), x_locations.shape = (n_users,)
             - user_statistics: all statistics of users, as a tupple of (downlink_load_masked, queue_length_Mb, incoming_traffic_Mb_masked)
@@ -395,10 +415,12 @@ class UAV_Movement_Controller():
             - vqlen_prop: the current state of the virtual queue for controlling the UAV's propulsion energy
 
         Returns:
+        --------
             - prediction: the DNN output, shape=(2,)
             - best_decision: shape=(2,), a tupple of (velocity_x, velocity_y), where velocity_x**2 + velocity_y**2 <= velocity_max**2
 
         Notes:
+        -----
             - uav_location_scale: a tupple of (x_uav, y_uav), where x_uav and y_uav in range (0,1)
             - user_heatmaps: shape=(n_grids,n_grids,n_channels), to be passed to the DNN
             - n_decisions: # of decisions generated by the actor module
@@ -406,12 +428,13 @@ class UAV_Movement_Controller():
             - ready_decisions:  a set of $n_decisions$ potential ready-to-use decisions, as a list of tupples of (dx,dy,velocity),
                 dx and dy in range (-1,1), dx**2 + dy**2 = 1, velocity in range (0,uav_speed_max)
         '''
-        # --> Step 1: Preprocessing the input data
+        # --> Step 1: Preprocess the input data
         user_heatmaps = self.preprocess_user_statistics(
             user_locations=user_locations, user_statistics=user_statistics,
             normalization_coeff=normalization_coeff, average=False
         )
         uav_location_scale = self.preprocess_uav_location(uav_location)
+        uav_vqlen_prop_scale = vqlen_prop / PW_THRES
         assert np.all(user_heatmaps >= 0), f"Error in generating user statistic heatmaps, {user_heatmaps}"
         assert np.all(uav_location_scale <= 1) and np.all(uav_location_scale >= 0), \
             f"Error in scaling the UAV location, {uav_location_scale}"
@@ -423,10 +446,12 @@ class UAV_Movement_Controller():
         # plt.show()
         # plt.savefig('test_heatmap.png')
 
-        # --> Step 2: Generate a set of potential decisions, must balance between exploration and exploitation
-        # The first decision: purely based on the DNN output. The remaining (k-1) decisions: generated (noise-added) based on the DNN output
+        # --> Step 2: Generate several decisions, balancing exploration & exploitation
+        # The first decision: purely based on the DNN output.
+        # The remaining (k-1) decisions: add noises to the DNN output
         dnn_prediction = self.model.predict(
             [tf.expand_dims(uav_location_scale, axis=0),
+             tf.expand_dims(uav_vqlen_prop_scale, axis=0),
              tf.expand_dims(user_heatmaps, axis=0)],
             verbose=0
         )
@@ -482,7 +507,8 @@ class UAV_Movement_Controller():
         self.update_replay_memory(
             uav_location_scale=uav_location_scale,
             user_heatmaps=user_heatmaps,
-            uav_movement_decision=best_dnn_decision
+            uav_movement_decision=best_dnn_decision,
+            uav_vqlen_prop_pw_scale=uav_vqlen_prop_scale
         )
 
         return (dnn_prediction, best_ready_decision)
