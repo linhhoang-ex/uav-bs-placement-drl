@@ -1,0 +1,34 @@
+num of slots: 501 (s)
+num of users: 100
+num of uavs: 4
+num of channels for one UAV: 50
+fixed bandwidth for one user: 0.3 MHz
+pTx_downlink: 200.0 mW
+boundary (m): 500x500
+average moving speed of users: 1
+Arrival rate (Mbps): 2
+ON_data_arrival_mean_Mb: [2]
+min session time (for MOS): 0.67 s
+max session time (for MOS): 6 s
+Vlya: 25.0
+initial UAV location: [[-250  250]
+ [-250 -250]
+ [ 250 -250]
+ [ 250  250]]
+z_init (m): 160
+z_min (m): 100
+z_max (m): 200
+uav_speedxy_max (m/s): 30
+uav_speedz_max (m/s): 3
+learning rate: 0.0005
+regularization parameter: 0.001
+num of actions: 10
+std_var for generating actions (exploration): 0.5
+std_var for generating actions (exploitation): 0.1
+training interval: 5 (s)
+memory size (training): 1024
+memory size (validation): 1024
+batch size: 100
+min samples for training: 256
+mean duration of ON state: 501
+mean duration of OFF state: 1
