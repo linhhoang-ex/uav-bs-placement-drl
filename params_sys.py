@@ -6,7 +6,7 @@ rng = np.random.default_rng()
 np.random.seed(0)
 
 
-class User:
+class User(object):
     def __init__(self, name) -> None:
         self.name = name
         self.x = None               # x-axis
@@ -31,7 +31,7 @@ class User:
         self.lambd_Mb = None                             # All-time average arrival rate (Mb)
 
 
-class UAV:
+class UAV (object):
     def __init__(self, name, x_init, y_init, z_init, xlim=np.array([-1, 1]),
                  ylim=np.array([-1, 1]), speedxy_max=5, speedz_max=1):
         self.name = name
@@ -48,9 +48,9 @@ class UAV:
         self.speedz_max = speedz_max    # maximum moving speed on Oxy (horizontal) and Oz (vertical) plane, m/s
 
         # For the energy consumption model
-        self.speedxy = np.zeros(shape=(n_slots))
-        self.speedz = np.zeros(shape=(n_slots))
-        self.p_propulsion = np.zeros(shape=(n_slots))
+        self.velocity = np.zeros(shape=(n_slots))
+        self.pw_prop_W = np.zeros(shape=(n_slots))   # propulsion power in Watts (W)
+        self.vqlen_prop = np.zeros(shape=(n_slots))    # virtual queues for controlling the propulsion power
 
 
 '''
@@ -60,7 +60,7 @@ System parameters
 '''
 n_users = 100                           # number of users
 n_uavs = 4                              # number of UAVs
-n_slots = 1 + np.int32(1.0e3)           # no. of slots in total
+n_slots = 1 + np.int32(0.5e3)           # no. of slots in total
 slot_len = 1                            # one second, fixed
 ss_min, ss_max = 0.67, 6                # in second, for the QoE model
 
@@ -76,7 +76,7 @@ bw_per_user = MHz(0.3)          # bandwidth for one user, 30 MHz w/ 100 users
 pTx_downlink = mW(200)          # transmit power (fixed) in mW of the UAV
 noise_pw_total = dBm(-90)       # total noise power
 n_channels = int(2 * n_users / n_uavs)      # no. of channels reserved for 1 UAV
-
+d0 = 0.5e-3            # min delay for communications, ~ 1 slot in LTE (0.5 ms)
 
 '''
 -------------------------------------------
@@ -125,7 +125,7 @@ ON_duration_mean_tslot = n_slots            # in # of time slots
 OFF_duration_mean_tslot = 1                 # in # of time slots
 
 # Expoential Moving Average (EMA): s(t) = alpha*x(t) + (1-alpha)*s(t-1)
-alpha_ema = 0.999                        # the smoothing factor of EMA
+alpha_ema = 0.999           # smoothing factor of the exponential movavg (EMA)
 
 requesting_rate = ON_duration_mean_tslot / (ON_duration_mean_tslot + OFF_duration_mean_tslot)   # Rate (on average) at which users sending a download request
 traffic_mean_Mb = np.mean(ON_data_arrival_mean_Mb) * requesting_rate                          # Average traffic load if a user sending a request
@@ -136,22 +136,32 @@ print('\n')
 
 
 '''
-----------------------
-Parameters for the UAV
-----------------------
+-----------------------
+Parameters for the UAVs
+-----------------------
 '''
 
 # UAV's altitude
 z_init = 150
-z_init_proposed = 150
+z_init_proposed = z_init
 z_min = 100
 z_max = 200
 
 # UAV's moving speed
-uav_speedxy_max = 10                        # horizontal speed, in meter/second (m/s)
-uav_speedz_max = 3                          # vertical speed, m/s
-uav_vxy_fixed = speed_user_avg              # ~ user movement speed, 1 m/s
-uav_vz_fixed = 0.5
+PW_THRES = 100                  # long-term threshold for the propulsion power (W)
+V_PW_THRES = 10                 # for the A2C agent, depending on the prop pw
+PW_MIN, PW_MAX = 82, 683        # the minimumm/maximum propulsion power (W)
+PW_HOVERING = 88                # propulsion power for hovering (W)
+V_ME = 6                        # maximum-endurance speed (m/s)
+
+# PW_THRES = 165                  # long-term threshold for the propulsion power (W)
+# PW_MIN, PW_MAX = 152.5, 365.9   # the minimumm/maximum propulsion energy (W)
+
+uav_speedxy_max = 30            # horizontal speed (m/s), ref: 10
+uav_speedz_max = 3              # vertical speed (m/s), ref: 3
+uav_vxy_fixed = V_ME            # for Centroid, Stationary, and Majority
+uav_vxy_a2c = V_ME              # for the A2C method
+beta_majority = 0.1             # coefficient of the majority-vote scheme
 
 # Coverage area of each UAV, overlaping with others
 xlim_uav = np.array([(-1, 1) for i in range(0, n_uavs)]) * boundary
@@ -250,14 +260,17 @@ print("Initial location of UAVs:\n", init_locations_uav)
 Parameters for reinforcement learning
 -------------------------------------
 '''
-# n_grids = 25
-# grid_size = int(2 * boundary / n_grids)
 
-grid_size = 20      # split the target area into grids of size 20x20 m2
+grid_size = 20      # split the target area into grids of size 25x25 m2
 n_grids = int(1 + np.floor((2 * boundary - 1) / grid_size))
 
 n_decisions = 10
-lyapunov_param = n_users * 500                      # parameter V in the Lyapunov framework
+std_var_vxvyvz_explore = 0.5
+std_var_vxvyvz_exploit = 0.1
+lyapunov_param = n_users / n_uavs               # scaling for the objective function
+VQPW_SCALE = PW_MAX                             # scaling for the propulsion energy (W)
+QLEN_SCALE = np.mean(ON_data_arrival_mean_Mb)   # scaling for the download queue
+
 # t_training_start = np.max([500, ON_duration_mean_tslot*2])
 t_training_start = 0
 training_interval = 5       # in time slots
@@ -270,8 +283,8 @@ print('\n')
 
 # Normalization coefficients
 n_users_per_grid = n_users / (n_grids * n_grids)
-user_counter_norm = np.max([5.0, 20 * n_users_per_grid])       # 20x the avg no. of users in a grid (min=5)
-queue_norm_Mb = 20 * n_users_per_grid * np.max(ON_data_arrival_mean_Mb)    # 20x the averge traffic of a grid (in Mb)
+user_counter_norm = np.max([5.0, 20 * n_users_per_grid])                    # 20x the avg no. of users in a grid (min=5)
+queue_norm_Mb = 20 * n_users_per_grid * np.max(ON_data_arrival_mean_Mb)     # 20x the averge traffic of a grid (in Mb)
 ch_capacity_norm_Mb = user_counter_norm * np.max(ON_data_arrival_mean_Mb)   # 20x the arrival traffic [Mb] of a grid
 
 print("Normalization coefficients:")
@@ -286,7 +299,6 @@ print("\n")
 For importing/exporting simulation data
 -----------------------------
 '''
-# folder_name = f"test, n_slots={n_slots}, n_users={n_users}, n_uavs={n_uavs}, ld={lambd_Mb:.1f} Mbps, v_user_avg={speed_user_avg}, vxy_uav_max={uav_speedxy_max}, uOFF={OFF_duration_mean_tslot:.0f}, k={n_decisions}"
 folder_name = (
     f"test, n_slots={n_slots}, "
     f"n_users={n_users}, "
@@ -298,11 +310,11 @@ folder_name = (
     f"k={n_decisions}"
 )
 
-sim_out_path = os.path.join(os.getcwd(), "dev", "sim-out", folder_name)        # simulation output to be saved here
+sim_out_path = os.path.join("simulation", "sim-output", folder_name)
 if os.path.exists(sim_out_path) is False:
     os.mkdir(sim_out_path)
 
-sim_in_path = os.path.join(os.getcwd(), 'dev', 'sim-in')
+sim_in_path = os.path.join('simulation', 'sim-input')
 if os.path.exists(sim_in_path) is False:
     os.mkdir(sim_in_path)
 
@@ -315,4 +327,4 @@ For teting
 ----------
 '''
 if __name__ == '__main__':
-    print(sim_out_path)
+    pass
