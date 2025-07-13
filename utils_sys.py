@@ -62,6 +62,27 @@ def update_queue_Mb(qlen_prev_Mb, arrival_Mb, departure_Mb):
     return qlen_next_Mb
 
 
+def update_vqlen_prop(
+    vqlen_curr: np.ndarray, pw_prop: np.ndarray, pw_thres: np.ndarray = PW_THRES
+) -> np.ndarray:
+    ''' Update the virtual queues for controlling the UAV's propulsion power.
+
+    Params
+    ------
+    - vqlen_curr: the current queue length of all virtual queues
+    - pw_prop: the propulsion power consumption for all UAVs
+    - pw_thres: the power consumption threshold for all UAVs
+
+    Returns
+    -------
+    - vqlen_next: the next state of all virtual queues
+    '''
+    vqlen_next = vqlen_curr + pw_prop - pw_thres
+    vqlen_next = np.where(vqlen_next > 0, vqlen_next, 0)
+
+    return vqlen_next
+
+
 def cal_downlink_throughput_Mb(qlen_prev_Mb, arrival_Mb, channel_capacity_Mb):
     '''Calculate the user's download speed (Mbps). If qlen+traffic=0, then throughput=0'''
     throughput_Mb = np.min([channel_capacity_Mb, qlen_prev_Mb + arrival_Mb])
@@ -252,14 +273,22 @@ def gen_animation_heatmap(xaxis_all, yaxis_all, t_max=100, t_step=10):
 '''
 
 
-def mos_func(qlen, lambda_):
-    ''' Estimate the Mean Opinion Score (MOS) of users
-        Parameters:
-            - qlen: the current queue length, scalar or array-like
-            - lambda_: the expected arrival rate, scalar or array-like
-        Return:
-            - mos_val: scalar or array-like
-        Reference: ITU-T G.1030 (02/2014), eq. (II-2) and Fig. II.4, page 17
+def mos_func(qlen: np.ndarray, lambda_: float, d0: float = d0):
+    ''' Estimate the Mean Opinion Score (MOS) of users.
+
+        Parameters
+        ----------
+        - qlen: the current queue length, scalar or array-like
+        - lambda_: the expected arrival rate, scalar or array-like
+        - d0: minimum delay for communications overhead (in second)
+
+        Returns
+        -------
+        - mos_val: scalar or array-like
+
+        References
+        ----------
+        ITU-T G.1030 (02/2014), eq. (II-2) and Fig. II.4, page 17
     '''
     # a, b = 5.72, 0.936        # 2.16s to 155s
     # a, b = 13.284, 2.436      # 30s to 155s
@@ -267,10 +296,10 @@ def mos_func(qlen, lambda_):
     # a, b = 4.27, 1.82         # 0.67s to 6s
     a = 4 * (-np.log(ss_min)) / np.log(ss_min / ss_max) + 5
     b = (-1) * 4 / np.log(ss_min / ss_max)
-    mos_val = a - b * np.log((qlen + 1e-4) / (lambda_ + 1e-4))  # avoid dividing by 0 and log(0)
+    mos_val = a - b * np.log(d0 + qlen / np.max([lambda_, 1e-4]))  # avoid dividing by 0
     mos_val_min, mos_val_max = 1.0, 5.0
-    mos_val = np.minimum(mos_val, mos_val_max)
-    mos_val = np.maximum(mos_val, mos_val_min)
+    mos_val = np.clip(mos_val, mos_val_min, mos_val_max)
+
     return mos_val
 
 
@@ -279,6 +308,7 @@ def mos_func_ss(ss_time):
     a = 4 * (-np.log(ss_min)) / np.log(ss_min / ss_max) + 5
     b = (-1) * 4 / np.log(ss_min / ss_max)
     mos_val = a - b * np.log(ss_time)  # avoid dividing by 0 and log(0)
+
     return mos_val
 
 
@@ -304,6 +334,21 @@ def qoe_fairness(mos, axis=None):
     return fairness_index
 
 
+def qoe_jain_fairness(mos, axis=None):
+    '''Calculate QoE fairness following Jain's fairness index.
+    Note: Users without QoE score (mos = np.NaN) are not counted.
+
+    ### Params
+        - mos: mean opinion score (MOS) of all users
+
+    ### Returns
+        - fairness_index: Jain's fairness index
+    '''
+    fairness_index = np.nanmean(mos, axis=axis)**2 / np.nanmean(mos**2, axis=axis)
+
+    return fairness_index
+
+
 '''
 -----------------------
     User Clustering
@@ -313,23 +358,75 @@ def qoe_fairness(mos, axis=None):
 
 def kmeans_clustering(loc_users, loc_uavs=None, n_clusters=n_uavs):
     '''Cluster users in to groups using KMeans Clustering, each corresponding to a UAV
-    Params:
+
+    Params
+    ------
         - loc_users: positions of all users, shape=(n_users, 3)
         - loc_uavs: positions of UAVs, shape=(n_uavs, 3)
-    Return:
+
+    Returns
+    -------
         - cluster_mat : shape=(n_users, n_uavs), cluster_mat[i,j] = 1 -> user i is associated to uav j
 
     Reference: https://scikit-learn.org/stable/modules/generated/sklearn.cluster.KMeans.html
     '''
     if loc_uavs is None:
-        kmeans = KMeans(n_clusters=n_clusters, verbose=1).fit(loc_users)     # standard X.shape = (n_samples, n_features)
+        kmeans = KMeans(
+            n_clusters=n_clusters,
+            verbose=1
+        ).fit(loc_users)     # standard X.shape = (n_samples, n_features)
         cluster_mat = np.eye(n_clusters)[kmeans.labels_]
     else:
-        kmeans = KMeans(n_clusters=n_clusters, init=loc_uavs,   # initial locations for clustering
-                        n_init=1, verbose=0).fit(loc_users)     # standard X.shape = (n_samples, n_features)
+        kmeans = KMeans(
+            n_clusters=n_clusters,
+            init=loc_uavs,          # initial locations for clustering
+            n_init=1,
+            verbose=0
+        ).fit(loc_users)            # standard X.shape = (n_samples, n_features)
         cluster_mat = np.eye(n_clusters)[kmeans.labels_]
 
     return cluster_mat, kmeans.labels_, kmeans.cluster_centers_
+
+
+def voronoi_clustering(
+    loc_users: np.ndarray, loc_uavs=None, n_clusters=n_uavs
+):
+    pass
+
+
+def zone_clustering(
+    loc_users: np.ndarray, loc_uavs: np.ndarray
+) -> int:
+    ''' Cluster users based on predefined zones, currently with 4 UAVs only.
+
+    Params
+    ------
+        - loc_users: 3D positions of all users, shape=(n_users, 3)
+        - loc_uavs: positions of UAVs, shape=(n_uavs, 3)
+
+    Returns
+    -------
+        - cids: the zone id of users, shape=(n_users,), id = 0 to 3
+    '''
+    assert loc_uavs[0][0] < 0 and loc_uavs[0][1] > 0, "Expect UAV 0 in Zone 0"
+    assert loc_uavs[1][0] < 0 and loc_uavs[1][1] < 0, "Expect UAV 1 in Zone 1"
+    assert loc_uavs[2][0] > 0 and loc_uavs[2][1] < 0, "Expect UAV 2 in Zone 2"
+    assert loc_uavs[3][0] > 0 and loc_uavs[3][1] > 0, "Expect UAV 3 in Zone 3"
+
+    n_users, _ = loc_users.shape
+    cids = np.full(shape=n_users, fill_value=np.NaN)
+    for i in range(n_users):
+        xloc, yloc = loc_users[i][0], loc_users[i][1]
+        if xloc < 0 and yloc >= 0:
+            cids[i] = 0
+        elif xloc < 0 and yloc < 0:
+            cids[i] = 1
+        elif xloc >= 0 and yloc < 0:
+            cids[i] = 2
+        elif xloc >= 0 and yloc >= 0:
+            cids[i] = 3
+
+    return cids.astype(int)
 
 
 '''
@@ -340,37 +437,42 @@ def kmeans_clustering(loc_users, loc_uavs=None, n_clusters=n_uavs):
 
 
 def cal_uav_propulsion_energy(V=0):
-    ''' Propulsion energy model for rotary-wing UAVs.
-    Reference: eq (13) in (Zeng Yong et al., 2019) Energy Minimization for
-    Wireless Communication with Rotary-Wing UAV
+    ''' Calculate the UAV's propulsion energy consumption (in Watts).
 
-    Args:
+    Params
+    ------
         V: velocity in m/s
 
-    Return:
+    Returns
+    -------
         p_sum: propulsion power consumption (W)
         p_blade_profile: blade profile power (W)
         p_induced: induced power (W)
         p_parasite: parasite power (W)
+
+    References
+    ----------
+    Eq (13) in (Zeng Yong et al., 2019), "Energy Minimization for Wireless
+    Communication with Rotary-Wing UAV".
     '''
-    Utip = 120      # tip speed of the rotor blade (m/s)
+    omega = 200     # blade angular velocity (rad/s), ref = 300
+    R = 0.4         # rotor radius (m)
     v0 = 4.03       # mean rotor induced velocity in hover
     d0 = 0.6        # fuselage drag ratio
+    s = 0.12        # rotor solidity for hovering and low-speed UAVs, ref = 0.05
     rho = 1.225     # air density in kg/m3
-    s = 0.05        # rotor solidity
-    A = 0.503       # rotor disc area in m2 for rotor radius = 0.4 m
+    A = 3.14 * R**2     # rotor disc area in sq. meter
+    Utip = omega * R    # tip speed of the rotor blade (m/s)
 
-    # delta = 0.012   # profile drag coefficient
-    # omega = 300     # blade angular velocity (radian/s)
-    # R = 0.4         # rotor radius (m)
-    # k = 0.1         # incremental correction factor to induced power
-    # W = 20          # air craft weight in Newton
+    W = 10          # air craft weight in Newton, ref = 20
+    delta = 0.012   # profile drag coefficient
+    k = 0.1         # incremental correction factor to induced power
 
-    # P0 = delta / 8 * rho * s * A * omega**3 * R**3      # eq. (64)
-    # Pi = (1 + k) * W**1.5 / np.sqrt(2 * rho * A)        # eq. (64)
+    P0 = delta / 8 * rho * s * A * omega**3 * R**3      # eq. (64)
+    Pi = (1 + k) * W**1.5 / np.sqrt(2 * rho * A)        # eq. (64)
 
-    P0 = 79.85628
-    Pi = 88.62793
+    # P0 = 79.85628     # (Zeng Yong et al., 2019)
+    # Pi = 88.62793     # (Zeng Yong et al., 2019)
 
     p_blade_profile = P0 * (1 + 3 * V**2 / Utip**2)
     p_induced = Pi * np.sqrt(np.sqrt(1 + V**4 / (4 * v0**4)) - V**2 / (2 * v0**2))
@@ -394,7 +496,8 @@ if __name__ == '__main__':
 
     plt.figure()
     for ld in ON_data_arrival_mean_Mb:
-        lambda_ = ld * np.ones(shape=(len(qlen)))     # Mbps
+        # lambda_ = ld * np.ones(shape=(len(qlen)))     # Mbps
+        lambda_ = ld
         mos = mos_func(qlen=qlen, lambda_=lambda_)
         df_mos = pd.DataFrame({'qlen_Mb': qlen, 'arrival_rate_Mbps': lambda_, 'mos': mos})
         sns.lineplot(data=df_mos, x='qlen_Mb', y='mos')
@@ -407,7 +510,7 @@ if __name__ == '__main__':
     plt.xlabel('Queue length (Mb)')
     plt.ylabel('Mean Opinion Score (MOS)')
     plt.tight_layout()
-    plt.title(f"MOS vs Queue Length, Given Arrival Rate = {lambda_[0]} Mbps")
+    plt.title(f"MOS vs Queue Length, Given Arrival Rate = {lambda_} Mbps")
     plt.tight_layout()
     plt.savefig(os.path.join(sim_out_path, 'MOS-function.png'), bbox_inches='tight')
     plt.show()
@@ -415,21 +518,33 @@ if __name__ == '__main__':
     '''
     Plot the UAV's energy model
     '''
-    V = np.linspace(0, 30, 31)
+    V = np.linspace(0, 30, 121)
     p_sum, p_blade_profile, p_induced, p_parasite = cal_uav_propulsion_energy(V)
     fig, ax = plt.subplots()
-    plt.plot(V, p_sum, label="total")
-    plt.plot(V, p_blade_profile, label="blade profile")
-    plt.plot(V, p_induced, label="induced")
-    plt.plot(V, p_parasite, label="parasite")
-    plt.legend()
-    plt.xlabel("velocity (m/s)")
-    plt.ylabel("power (W)")
-    plt.title("UAV's propulsion energy model")
-    plt.grid(True)
+    plt.plot(V, p_sum, label="Total Power")
+    plt.plot(V, p_blade_profile, label="Blade Profile")
+    plt.plot(V, p_induced, label="Induced")
+    plt.plot(V, p_parasite, label="Parasite")
+    plt.axhline(y=PW_THRES, label='Power Threhold', color='k', linestyle="--")
+    plt.legend(fontsize="medium")
+    plt.xlabel("UAV Velocity (m/s)", fontsize="large")
+    plt.ylabel("Propulsin Power (W)", fontsize="large")
+    plt.xlim(left=0, right=np.max(V))
+    plt.ylim(bottom=0, top=700)
+    plt.xticks(fontsize="large")
+    plt.yticks(fontsize="large")
+    # plt.title("UAV's propulsion energy model")
+    plt.grid(True, linestyle="--")
     plt.tight_layout()
-    plt.savefig(os.path.join(sim_out_path, 'uav-energy-model.png'))
+    plt.savefig(os.path.join(sim_out_path, 'uav-energy-model.pdf'))
     plt.show()
+
+    print("\n")
+    print(f'propulsion power (min) = {np.min(p_sum)}')
+    print(f'propulsion power (max) = {np.max(p_sum)}')
+    print(f"propulsion power (hovering) = {p_sum[0]}")
+    print(f"argmin(prop pw): v (m/s) = {V[np.argmin(p_sum)]}")
+    print("\n")
 
     '''
     Test bandwidth allocation using linear programming
