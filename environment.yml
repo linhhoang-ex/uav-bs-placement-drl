@@ -1,4 +1,4 @@
-name: base
+name: tf-gpu-env
 channels:
   - defaults
 dependencies:
@@ -11,4 +11,5 @@ dependencies:
   - cudnn=8.1.0
   - cudatoolkit=11.2
   - pandas
-prefix: C:\Users\linhh\anaconda3\envs\tf-gpu-env
+  - rich
+  - matplotlib
