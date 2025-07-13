@@ -31,31 +31,97 @@ def cal_direction(x0, y0, x1, y1):
     '''
     Calculate the direction vector based on the current position (x0,y0) and the target position (x1,y1).
     The next position is (x0 + dx*speed_max*slot_len, y0 + dy*speed_max*slot_len)
-    Parameters:
-        (x0, y0) : the current position
-        (x1, y1) : the target position
-    Returns:
-        (dx, dy) : the direction vector, dx and dy are in range (-1,1)
+
+    Parameters
+    ----------
+        - (x0, y0): the current position
+        - (x1, y1): the target position
+
+    Returns
+    -------
+        - (dx, dy): the direction vector, dx and dy are in range (-1,1)
+        - delta_d: the moving distance
     '''
     delta_x = x1 - x0                               # horizontal distance difference
     delta_y = y1 - y0                               # vertical distance difference
-    delta_d = np.sqrt(delta_x**2 + delta_y**2)      # distance difference
+    delta_d = np.sqrt(delta_x**2 + delta_y**2)      # travel distance
     dx, dy = (delta_x / delta_d, delta_y / delta_d) if delta_d > 0 else (0, 0)
+
     return dx, dy, delta_d
+
+
+def get_majorvote_placement(
+    zoneid: int, xlocs: np.ndarray, ylocs: np.ndarray, boundary: float = 250,
+    beta: float = 0.1
+) -> np.ndarray:
+    ''' Get the optimal UAV placement based on the majority-vote rule in [1],
+    currently considering a scenario with 4 UAVs only.
+
+    Params
+    ------
+        - zoneid: id of the considered zone
+        - xlocs, ylocs: locations of all users *in the considered zone*
+        - boundary: boundary of the whole area w/ 4 zones, [-2*bound, 2*bound]
+        - beta: an coefficient for the UAV displacement (eq (1) in [1])
+
+    Returns
+    -------
+        - (x_opt, y_opt): the optimal placement for the UAV
+
+    References
+    ----------
+    [1] “Adaptive Deployment for UAV-Aided Communication Networks” (2019),
+    IEEE Trans. Wireless Commun, doi: 10.1109/TWC.2019.2926279.
+
+    '''
+    R = boundary / 2        # each UAV covers a zone with boundary [-R, R]
+    if zoneid == 0:
+        x0, y0 = (-1) * boundary / 2, boundary / 2
+    elif zoneid == 1:
+        x0, y0 = (-1) * boundary / 2, (-1) * boundary / 2
+    elif zoneid == 2:
+        x0, y0 = boundary / 2, (-1) * boundary / 2
+    elif zoneid == 3:
+        x0, y0 = boundary / 2, boundary / 2
+
+    # majority-vote rule
+    x_left, x_right = np.sum(xlocs < x0), np.sum(xlocs > x0)
+    y_up, y_down = np.sum(ylocs > y0), np.sum(ylocs < y0)
+
+    if x_left > x_right:
+        x_opt = x0 - beta * R
+    elif x_left < x_right:
+        x_opt = x0 + beta * R
+    else:
+        x_opt = x0
+
+    if y_up > y_down:
+        y_opt = y0 + beta * R
+    elif y_up < y_down:
+        y_opt = y0 - beta * R
+    else:
+        y_opt = y0
+
+    return (x_opt, y_opt)
 
 
 def update_UAV_location(x0, y0, dx, dy, speed=5, slot_len=1):
     '''Update UAV location in the horizontal plane
-    Parameters:
+
+    Parameters
+    ----------
         - (x0,y0) : current location
         - (dx,dy) : moving direction, both in range (-1,1)
-        - speed : moving speed, in m/s
+        - speed : moving speed, in m/s, where vx = dx * speed, vy = dy * speed
         - slot_len : slot length in second
-    Returns:
+
+    Returns
+    -------
         - (x1,y1) : location in the next time slot
     '''
     x1 = x0 + dx * speed * slot_len
     y1 = y0 + dy * speed * slot_len
+
     return (x1, y1)
 
 
