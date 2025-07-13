@@ -11,12 +11,10 @@ This repository is the implementation of the deep reinforcement learning (DRL) f
 
 ## How to run the simulation
 1. Configure the simulation parameters in [`params_sys.py`](params_sys.py)
-2. Run [`main.ipynb`](main.ipynb) start the simulation. This notebook also have plots used for check the system configuration and simulation outputs.
-3. Check [`simulation`](simulation) folder to investigate all figures and numerical results (exported to xlsx files) created during the simulation at Step 2.
-
-Optional:
-4. Use [`SingleDroneEnv_A2C.ipynb`](SingleDroneEnv_A2C.ipynb) to train an A2C agent following [Gymasinum](https://gymnasium.farama.org/)'s API standard for reinforcement learning. This trained agent could be used in the `K-Means + A2C` benchmark method in [`main.ipynb`](main.ipynb).<br>
-5. Investigate the user mobility model in [`mobility_model.py`](mobility_model.py), the user traffic model in [`traffic_model.py`](traffic_model.py), the wireless communication channel modelling in [`channel_model.py`](channel_model.py), and the proposed UAV movement method in [`uav_controller.py`](uav_controller.py).<br>
+2. [Optional] Use [`SingleDroneEnv_A2C.ipynb`](SingleDroneEnv_A2C.ipynb) to train an A2C agent following [Gymasinum](https://gymnasium.farama.org/)'s API standard for reinforcement learning. This trained agent could be used in the `K-Means + A2C` benchmark method in [`main.ipynb`](main.ipynb).
+3. Run [`main.ipynb`](main.ipynb) start the simulation. This notebook also have plots used for check the system configuration and simulation outputs.
+4. Check [`simulation`](simulation) folder to investigate all figures and numerical results (exported to xlsx files) created during the simulation at Step 3.
+5. Investigate the user mobility model in [`mobility_model.py`](mobility_model.py), the user traffic model in [`traffic_model.py`](traffic_model.py), the wireless communication channel modelling in [`channel_model.py`](channel_model.py), and the proposed UAV movement method in [`uav_controller.py`](uav_controller.py).
 
 ## Cite this work
 ```
